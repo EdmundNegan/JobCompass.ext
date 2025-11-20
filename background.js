@@ -10,24 +10,21 @@ chrome.action.onClicked.addListener(async (tab) => {
     if (!tab.id) return;
 
     try {
-        // Inject scrape function into the current tab
         const [injectionResult] = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
             func: scrapeJobFromPage
         });
 
-        const job = injectionResult && injectionResult.result;
-        if (!job) {
+        const job = injectionResult.result;
+        if (!job || !job.found) {
             console.log("No job found on the page.");
             return;
         }
 
         // Fallbacks in case fields are missing
-        if (!job.title) job.title = "(Untitled job)";
-        if (!job.company) job.company = "";
-        if (!job.location) job.location = "";
+        // (Removed as not needed with proper checking)
 
-        console.log("Scraped job:", job);
+        console.log("Scraped job:", job.job);
 
         // Add scraped timestamp
         job.job.scrapedAt = new Date().toISOString();
@@ -61,81 +58,79 @@ function scrapeJobFromPage() {
         return el ? el.textContent.trim() : "";
     }
 
-    const JobDetails = document.querySelector(".ccb-job-details");
-    if (JobDetails) {
-        const title = getText(JobDetails.querySelector("h1"));
-
-        // department / team + broad area (e.g. "Backend, Engineering")
-        const departmentEl = JobDetails.querySelector(".css-eBnvrI");
-        const department = getText(departmentEl);
-
-        // locations (multiple cities separated into .css-ghtRay)
-        const locationEls = JobDetails.querySelectorAll(".css-ghtRay");
-        const locations = Array.from(locationEls)
-            .map((el) => getText(el).replace(/\s+\|\s*$/, "")) // strip trailing " |"
-            .filter((txt) => txt.length > 0)
-            .join(" | ");
-
-        // description: we grab all <p> under .css-cvJeNJ (the main body area)
-        let description = "";
-        const descContainer =
-            document.querySelector(".css-cvJeNJ") ||
-            uberJobDetails.parentElement;
-        if (descContainer) {
-            const ps = descContainer.querySelectorAll("p");
-            description = Array.from(ps)
-                .map((p) => p.textContent.trim())
-                .filter((txt) => txt.length > 0)
-                .join("\n\n");
+    // General selectors for job postings
+    const titleSelectors = [
+        'h1',
+         '.job-title', '.jobTitle', 'job_title', '[data-job-title]', '[data-qa="job-title"]',
+         'h1.title', '.title', '.position-title',
+          '.job-name', '[itemprop="title"]', '.posting-title'];
+    let title = '';
+    for (const sel of titleSelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+            title = getText(el);
+            if (title) break;
         }
-
-        const job = {
-            source: window.location.hostname,
-            url: window.location.href,
-            title: title,
-            company: "",
-            department: department,
-            locations: locations,
-            description: description
-        };
-
-        return { found: true, job: job };
     }
-    // ========== END OF UBER-SPECIFIC LOGIC ==========
 
-
-    // =========================================================
-    // === EDIT HERE: GENERIC / OTHER-SITE FALLBACKS         ===
-    // =========================================================
-    // You can add additional blocks like the Uber one above,
-    // checking for other patterns, e.g. LinkedIn, Greenhouse, etc.
-    //
-    // Example sketch for a generic page using <article>:
-    
-    const article = document.querySelector("article");
-    if (article) {
-        const title = getText(article.querySelector("h1, h2"));
-        const company = getText(
-            article.querySelector("[data-company-name], .company, .job-company")
-        );
-        const location = getText(
-            article.querySelector("[data-location], .location, .job-location")
-        );
-        const description = getText(article);
-    
-        if (title) {
-            return {
-                found: true,
-                job: {
-                    source: window.location.hostname,
-                    url: window.location.href,
-                    title: title,
-                    company: company,
-                    locations: location,
-                    description: description
-                }
-            };
+    const companySelectors = ['.company', '.job-company', 
+        '.jobCompany','[data-company]',
+         '.employer', '.organization', '.company-name', '.employer-name'];
+    let company = '';
+    for (const sel of companySelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+            company = getText(el);
+            if (company) break;
         }
+    }
+
+    const locationSelectors = ['.location', '.job-location', '.jobLocation',
+    '[data-location]', '[data-qa="location"]',
+    '.city', '.place', '.job-place', 
+    '.address', '.job-address',
+    '[itemprop="jobLocation"]',
+    '.location-text'];
+    let locations = '';
+    for (const sel of locationSelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+            locations = getText(el);
+            if (locations) break;
+        }
+    }
+
+    const descriptionSelectors = ['[class*="description"]',
+    '[id*="description"]',
+    '.job-description', '.jobDescription',
+    '[data-description]', 
+    '.details', '.job-details',
+    '.content', '.job-content',
+    'article', '.main-content',
+    '[itemprop="description"]',
+    '.show-more-less-html'];
+    let description = '';
+    for (const sel of descriptionSelectors) {
+        const el = document.querySelector(sel);
+        if (el) {
+            description = getText(el);
+            if (description) break;
+        }
+    }
+
+    // If we found at least a title or description, consider it a job page
+    if (title || description) {
+        return {
+            found: true,
+            job: {
+                source: window.location.hostname,
+                url: window.location.href,
+                title: title,
+                company: company,
+                locations: locations,
+                description: description,
+            }
+        };
     }
 
     // If nothing matched:
@@ -146,7 +141,7 @@ function scrapeJobFromPage() {
 function downloadJobsAsCSV(jobs) {
     if (!jobs || !jobs.length) return;
 
-    const headers = ["Title", "Company", "Locations", "Description", "URL", "Source", "Department", "Scraped At"];
+    const headers = ["Title", "Company", "Locations", "Description", "URL", "Source", "Scraped At"];
     const csvRows = [];
 
     // Header row
@@ -154,6 +149,7 @@ function downloadJobsAsCSV(jobs) {
 
     // Data rows
     for (const item of jobs) {
+        if (!item || !item.job) continue; // Skip invalid items
         const jobData = item.job;
         const row = [
             jobData.title || "",
@@ -162,7 +158,6 @@ function downloadJobsAsCSV(jobs) {
             jobData.description || "",
             jobData.url || "",
             jobData.source || "",
-            jobData.department || "",
             jobData.scrapedAt || ""
         ].map((value) => {
             value = String(value);
