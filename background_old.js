@@ -85,66 +85,7 @@ function scrapeJobFromPage() {
     // ===================================================================
     // PLATFORM-SPECIFIC SCRAPERS - Check these first before generic tiers
     // ===================================================================
-    
-    // Indeed.com specific scraper
-    if (window.location.hostname.includes('indeed.com')) {
-        debug.source = 'indeed-specific';
-        debug.tiers.push('platform-specific');
-        
-        const indeedHeader = document.querySelector('.ia-JobHeader-information, [class*="JobHeader"]');
-        let title = '', company = '', locations = '';
-        
-        if (indeedHeader) {
-            // Title: h1 inside header
-            const titleEl = indeedHeader.querySelector('h1');
-            if (titleEl) {
-                title = titleEl.textContent.trim();
-                debug.selectors.title = 'indeed:h1';
-            }
-            
-            // Company and Location: span text in format "Company - Location"
-            const companyLocSpan = indeedHeader.querySelector('span[class*="css-"]');
-            if (companyLocSpan) {
-                const text = companyLocSpan.textContent.trim();
-                const parts = text.split('-').map(p => p.trim());
-                if (parts.length >= 2) {
-                    company = parts[0];
-                    locations = parts.slice(1).join(' - ');
-                    debug.selectors.company = 'indeed:span-split';
-                    debug.selectors.locations = 'indeed:span-split';
-                } else if (parts.length === 1) {
-                    company = parts[0];
-                    debug.selectors.company = 'indeed:span';
-                }
-            }
-        }
-        
-        // Description: .ia-JobDescription
-        let description = '';
-        const descEl = document.querySelector('.ia-JobDescription');
-        if (descEl) {
-            const clone = descEl.cloneNode(true);
-            clone.querySelectorAll('script, style, button').forEach(el => el.remove());
-            description = clone.innerText.trim();
-            debug.selectors.description = 'indeed:.ia-JobDescription';
-        }
-        
-        if (title || description) {
-            return {
-                found: true,
-                job: {
-                    source: window.location.hostname,
-                    url: window.location.href,
-                    title: title,
-                    company: company,
-                    locations: locations,
-                    description: description,
-                },
-                debug
-            };
-        }
-    }
-    
+
     // LinkedIn specific scraper
     if (window.location.hostname.includes('linkedin.com')) {
         debug.source = 'linkedin-specific';
@@ -155,58 +96,44 @@ function scrapeJobFromPage() {
         let locations = '';
         let description = '';
 
-        // Title: avoid dynamic ember IDs; use stable selectors
-        // Try unified top card header H1
-        const titleH1 = document.querySelector('.job-details-jobs-unified-top-card__job-title h1, h1.jobs-unified-top-card__job-title');
-        if (titleH1) {
-            title = titleH1.textContent.trim();
-            debug.selectors.title = 'linkedin:h1';
+        // Title: h1.t-24.t-bold.inline > a
+        const titleAnchor = document.querySelector('h1.t-24.t-bold.inline a');
+        if (titleAnchor) {
+            title = titleAnchor.textContent.trim();
+            debug.selectors.title = 'linkedin:h1.t-24.t-bold.inline a';
         } else {
-            // Fallback: anchor within header that points to /jobs/view/
-            const titleAnchor = document.querySelector('[data-test-app-aware-link][href*="/jobs/view/"]');
-            if (titleAnchor) {
-                title = titleAnchor.textContent.trim();
-                debug.selectors.title = 'linkedin:app-aware-link /jobs/view/';
+            const h1 = document.querySelector('h1.t-24.t-bold.inline');
+            if (h1) {
+                title = h1.textContent.trim();
+                debug.selectors.title = 'linkedin:h1.t-24.t-bold.inline';
             }
         }
 
-        // Company: prefer app-aware company link; then nearby company name container
-        const companyLink = document.querySelector('.job-details-jobs-unified-top-card__company-name a');
-        if (companyLink) {
-            company = companyLink.textContent.trim();
-            debug.selectors.company = 'linkedin:a[data-test-app-aware-link][href*="/company/"]';
-        } else {
-            const companyContainer = document.querySelector('.topcard__org-name-link, .jobs-unified-top-card__company-name, .jobs-unified-top-card__subtitle-primary-group a, .job-details-jobs-unified-top-card__company-name a');
-            if (companyContainer) {
-                company = companyContainer.textContent.trim();
-                debug.selectors.company = 'linkedin:company-container';
-            }
+        // Company: anchor with data-test-app-aware-link or similar
+        const companyEl = document.querySelector('a[data-test-app-aware-link], a[href*="/company/"]');
+        if (companyEl) {
+            company = companyEl.textContent.trim();
+            debug.selectors.company = 'linkedin:a[data-test-app-aware-link]';
         }
 
-        // Location: bullets in unified top card or low-emphasis text
-        const locationBullet = document.querySelector('.job-details-jobs-unified-top-card__primary-description-container span');
-        if (locationBullet) {
-            locations = locationBullet.textContent.trim();
-            debug.selectors.locations = 'linkedin:top-card-bullet';
-        } else {
-            const locationSpan = document.querySelector('[data-test-topcard-location]');
-            if (locationSpan) {
-                locations = locationSpan.textContent.trim();
-                debug.selectors.locations = 'linkedin:[data-test-topcard-location]';
-            }
+        // Location: span.tvm__text--low-emphasis
+        const locationEl = document.querySelector('span.tvm__text.tvm__text--low-emphasis');
+        if (locationEl) {
+            locations = locationEl.textContent.trim();
+            debug.selectors.locations = 'linkedin:span.tvm__text--low-emphasis';
         }
 
-        // Description: common containers 
-        const descSelectors = [
-            '#job-details > div > p', 'div.jobs-description__content',
+        // Description: common containers
+        const descContainers = [
+            'div.jobs-description__content',
             'div.jobs-description__container',
             'section.jobs-description',
             'div[data-test-description]',
             'div[class*="jobs-description"]',
             'p[dir="ltr"]'
         ];
-        for (const sel of descSelectors) {
-            const el = root.querySelector(sel);
+        for (const sel of descContainers) {
+            const el = document.querySelector(sel);
             if (el) {
                 const clone = el.cloneNode(true);
                 clone.querySelectorAll('script, style, button').forEach(n => n.remove());
@@ -231,13 +158,6 @@ function scrapeJobFromPage() {
             };
         }
     }
-
-    // Add more platform-specific scrapers here
-    // if (window.location.hostname.includes('glassdoor.com')) { ... }
-
-    // ===================================================================
-    // GENERIC THREE-TIER APPROACH (fallback if no platform match)
-    // ===================================================================
 
     function scrapeSchemaJSON() {
         const scripts = document.querySelectorAll('script[type="application/ld+json"]');
