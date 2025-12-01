@@ -3,26 +3,74 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.action.setBadgeText({
         text: ""
     });
+    
+    // Create context menu item for options
+    chrome.contextMenus.create({
+        id: 'openOptions',
+        title: 'JobCompass Options',
+        contexts: ['action']
+    });
 });
 
-// Click the extension to scrape current page
-chrome.action.onClicked.addListener(async (tab) => {
-    if (!tab.id) return;
+// Handle context menu clicks
+chrome.contextMenus.onClicked.addListener((info) => {
+    if (info.menuItemId === 'openOptions') {
+        chrome.runtime.openOptionsPage();
+    }
+});
+
+// Handle messages from popup
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'scrape') {
+        handleScrapeRequest(request.tabId, request.method, request.settings)
+            .then((result) => {
+                sendResponse(result);
+            })
+            .catch((error) => {
+                sendResponse({ success: false, error: error.message });
+            });
+        return true; // Indicates we will send a response asynchronously
+    }
+    
+    if (request.action === 'downloadCSV') {
+        chrome.storage.local.get({ jobs: [] }, (data) => {
+            const jobs = data.jobs;
+            if (jobs && jobs.length > 0) {
+                downloadJobsAsCSV(jobs);
+                sendResponse({ success: true });
+            } else {
+                sendResponse({ success: false, error: 'No jobs saved' });
+            }
+        });
+        return true;
+    }
+});
+
+// Function to handle scrape requests from popup
+async function handleScrapeRequest(tabId, method, llmSettings) {
+    if (!tabId) {
+        throw new Error('No tab ID provided');
+    }
 
     try {
-        const [injectionResult] = await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: scrapeJobFromPage
-        });
-
-        const job = injectionResult.result;
-        if (!job || !job.found) {
-            console.log("No job found on the page.");
-            return;
+        let job;
+        
+        if (method === 'llm' && llmSettings) {
+            // Use LLM API for scraping
+            console.log("Using LLM API for scraping...");
+            job = await scrapeJobWithLLM(tabId, llmSettings);
+        } else {
+            // Use default DOM-based scraping
+            const [injectionResult] = await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                func: scrapeJobFromPage
+            });
+            job = injectionResult.result;
         }
 
-        // Fallbacks in case fields are missing
-        // (Removed as not needed with proper checking)
+        if (!job || !job.found) {
+            return { success: false, error: 'No job found on the page.' };
+        }
 
         console.log("Scraped job:", job.job);
         if (job.debug) {
@@ -33,27 +81,287 @@ chrome.action.onClicked.addListener(async (tab) => {
         job.job.scrapedAt = new Date().toISOString();
 
         // Save the job to local storage
-        chrome.storage.local.get({ jobs: [] }, (data) => {
-            const jobs = data.jobs;
-            jobs.push(job);
-            
-            chrome.storage.local.set({ jobs }, () => {
-                console.log("Job saved. Total jobs:", jobs.length);
+        return new Promise((resolve) => {
+            chrome.storage.local.get({ jobs: [] }, (data) => {
+                const jobs = data.jobs;
+                jobs.push(job);
+                
+                chrome.storage.local.set({ jobs }, () => {
+                    console.log("Job saved. Total jobs:", jobs.length);
 
-                // Show count of saved jobs on the badge
-                chrome.action.setBadgeText({
-                    tabId: tab.id,
-                    text: String(jobs.length),
+                    // Show count of saved jobs on the badge
+                    chrome.action.setBadgeText({
+                        tabId: tabId,
+                        text: String(jobs.length),
+                    });
+
+                    // Generate/Download CSV everytime 
+                    downloadJobsAsCSV(jobs);
+                    
+                    resolve({ success: true, jobCount: jobs.length });
                 });
-
-                // Generate/Download CSV everytime 
-                downloadJobsAsCSV(jobs);
             });
         });
     } catch (error) {
         console.error("Error scraping job:", error);
+        throw error;
     }
-});
+}
+
+// Function to get page content for LLM processing
+function getPageContent() {
+    // Remove script and style elements
+    const clone = document.cloneNode(true);
+    clone.querySelectorAll('script, style, link, button, input, noscript, nav, footer, header, iframe, svg').forEach(el => el.remove());
+    
+    // Get main content areas
+    const mainContent = clone.querySelector('main, article, [role="main"], .content, #content, .job-description, .job-details');
+    const content = mainContent ? mainContent.innerText : clone.body.innerText;
+    
+    // Limit content length to avoid token limits (keep first ~8000 chars)
+    const maxLength = 8000;
+    const truncatedContent = content.length > maxLength ? content.substring(0, maxLength) + '...' : content;
+    
+    return {
+        url: window.location.href,
+        title: document.title,
+        content: truncatedContent,
+        html: clone.body.innerHTML.substring(0, 10000) // Limited HTML for context
+    };
+}
+
+// Function to call LLM API and extract job information
+async function scrapeJobWithLLM(tabId, settings) {
+    try {
+        // Get page content
+        const [contentResult] = await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            func: getPageContent
+        });
+        
+        const pageData = contentResult.result;
+        
+        // Prepare prompt for LLM
+        const prompt = `Extract job listing information from the following webpage content. Return a JSON object with the following structure:
+{
+  "title": "Job title",
+  "company": "Company name",
+  "locations": "Location(s) - can be multiple locations separated by commas",
+  "description": "Full job description"
+}
+
+Webpage URL: ${pageData.url}
+Page Title: ${pageData.title}
+
+Content:
+${pageData.content}
+
+Return ONLY valid JSON, no additional text or markdown formatting.`;
+
+        // Ensure endpoint is set (for backward compatibility)
+        if (!settings.endpoint) {
+            if (settings.provider === 'openai') {
+                settings.endpoint = 'https://api.openai.com/v1/chat/completions';
+            } else if (settings.provider === 'anthropic') {
+                settings.endpoint = 'https://api.anthropic.com/v1/messages';
+            } else if (settings.provider === 'gemini') {
+                settings.endpoint = 'https://generativelanguage.googleapis.com/v1beta/models';
+            }
+        }
+        
+        // Call LLM API based on provider
+        let response;
+        if (settings.provider === 'anthropic') {
+            response = await callAnthropicAPI(settings, prompt);
+        } else if (settings.provider === 'openai') {
+            response = await callOpenAIAPI(settings, prompt);
+        } else if (settings.provider === 'gemini') {
+            response = await callGeminiAPI(settings, prompt);
+        } else {
+            throw new Error('Unknown API provider. Please select OpenAI, Anthropic, or Gemini.');
+        }
+        
+        // Parse LLM response
+        const jobData = parseLLMResponse(response, pageData.url);
+        
+        if (!jobData.title && !jobData.description) {
+            throw new Error('LLM API did not extract any job information. The response may be invalid or the page content may not contain job listing information.');
+        }
+        
+        return {
+            found: true,
+            job: {
+                source: new URL(pageData.url).hostname,
+                url: pageData.url,
+                title: jobData.title || '',
+                company: jobData.company || '',
+                locations: jobData.locations || '',
+                description: jobData.description || ''
+            },
+            debug: {
+                source: 'llm-api',
+                provider: settings.provider,
+                model: settings.model
+            }
+        };
+    } catch (error) {
+        console.error('LLM scraping error:', error);
+        // Don't fallback - throw error so user sees the failure message
+        throw error;
+    }
+}
+
+// Function to call OpenAI-compatible API
+async function callOpenAIAPI(settings, prompt) {
+    const response = await fetch(settings.endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${settings.apiKey}`
+        },
+        body: JSON.stringify({
+            model: settings.model,
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You are a helpful assistant that extracts structured information from web pages. Always return valid JSON only.'
+                },
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ],
+            temperature: 0.3,
+            max_tokens: 2000
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    return data.choices[0].message.content;
+}
+
+// Function to call Anthropic API
+async function callAnthropicAPI(settings, prompt) {
+    const response = await fetch(settings.endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': settings.apiKey,
+            'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+            model: settings.model,
+            max_tokens: 2000,
+            messages: [
+                {
+                    role: 'user',
+                    content: prompt
+                }
+            ]
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    return data.content[0].text;
+}
+
+// Function to call Google Gemini API
+async function callGeminiAPI(settings, prompt) {
+    const model = settings.model || 'gemini-2.0-flash';
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-goog-api-key': settings.apiKey
+        },
+        body: JSON.stringify({
+            contents: [
+                {
+                    parts: [
+                        {
+                            text: `You are a helpful assistant that extracts structured information from web pages. Always return valid JSON only.\n\n${prompt}`
+                        }
+                    ]
+                }
+            ],
+            generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: 2000
+            }
+        })
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    
+    if (!data.candidates || !data.candidates[0] || !data.candidates[0].content || !data.candidates[0].content.parts) {
+        throw new Error('Invalid response format from Gemini API');
+    }
+    
+    return data.candidates[0].content.parts[0].text;
+}
+
+// Function to parse LLM response and extract job data
+function parseLLMResponse(llmResponse, url) {
+    try {
+        // Try to extract JSON from response (handle markdown code blocks)
+        let jsonStr = llmResponse.trim();
+        
+        // Remove markdown code blocks if present
+        jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        
+        // Try to find JSON object in the response
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            jsonStr = jsonMatch[0];
+        }
+        
+        const parsed = JSON.parse(jsonStr);
+        
+        return {
+            title: parsed.title || '',
+            company: parsed.company || '',
+            locations: parsed.locations || '',
+            description: parsed.description || ''
+        };
+    } catch (error) {
+        console.error('Error parsing LLM response:', error);
+        console.log('Raw LLM response:', llmResponse);
+        
+        // Fallback: try to extract fields using regex
+        const titleMatch = llmResponse.match(/"title"\s*:\s*"([^"]+)"/i) || 
+                          llmResponse.match(/title["\s:]+([^\n,}]+)/i);
+        const companyMatch = llmResponse.match(/"company"\s*:\s*"([^"]+)"/i) || 
+                            llmResponse.match(/company["\s:]+([^\n,}]+)/i);
+        const locationMatch = llmResponse.match(/"locations?"\s*:\s*"([^"]+)"/i) || 
+                             llmResponse.match(/location["\s:]+([^\n,}]+)/i);
+        const descMatch = llmResponse.match(/"description"\s*:\s*"([^"]+)"/i) || 
+                         llmResponse.match(/description["\s:]+([^\n,}]+)/i);
+        
+        return {
+            title: titleMatch ? titleMatch[1].trim() : '',
+            company: companyMatch ? companyMatch[1].trim() : '',
+            locations: locationMatch ? locationMatch[1].trim() : '',
+            description: descMatch ? descMatch[1].trim() : ''
+        };
+    }
+}
 
 // Function to scrape job details from the current page
 function scrapeJobFromPage() {
