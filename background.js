@@ -142,12 +142,22 @@ async function scrapeJobWithLLM(tabId, settings) {
         const pageData = contentResult.result;
         
         // Prepare prompt for LLM
-        const prompt = `Extract job listing information from the following webpage content. Return a JSON object with the following structure:
+        const prompt = `Extract job listing information from the following webpage content. For any fields you cannot find, return an empty string "". Return a JSON object with the following structure:
 {
   "title": "Job title",
   "company": "Company name",
   "locations": "Location(s) - can be multiple locations separated by commas",
-  "description": "Full job description"
+  "jobType": "e.g., 'Full-time', 'Part-time', 'Contract', 'Internship'",
+  "workMode": "e.g., 'Remote', 'Hybrid', 'On-site'",
+  "experienceLevel": "e.g., 'Entry-level', 'Mid-level', 'Senior', 'Lead', '0-3 years'",
+  "educationLevel": "e.g., 'Bachelor's Degree', 'Master's Degree', 'PhD'",
+  "duration": "e.g., '6 months', '1 year contract'",
+  "salaryAndBenefits": "Capture any mention of salary, stock options, bonuses, and benefits like health insurance, 401k, etc.",
+  "visaSponsorship": "e.g., 'Visa sponsorship available', 'Not available', 'Case-by-case'",
+  "responsibilities": "A bulleted or paragraph list of job responsibilities.",
+  "requiredSkills": "A bulleted or paragraph list of required skills or qualifications.",
+  "preferredSkills": "A bulleted or paragraph list of preferred/bonus skills.",
+  "description": "A clean, readable, and well-formatted version of the full job description, with proper paragraphs and bullet points."
 }
 
 Webpage URL: ${pageData.url}
@@ -193,10 +203,20 @@ Return ONLY valid JSON, no additional text or markdown formatting.`;
             job: {
                 source: new URL(pageData.url).hostname,
                 url: pageData.url,
-                title: jobData.title || '',
-                company: jobData.company || '',
-                locations: jobData.locations || '',
-                description: jobData.description || ''
+                title: jobData.title,
+                company: jobData.company,
+                locations: jobData.locations,
+                jobType: jobData.jobType,
+                workMode: jobData.workMode,
+                experienceLevel: jobData.experienceLevel,
+                educationLevel: jobData.educationLevel,
+                duration: jobData.duration,
+                salaryAndBenefits: jobData.salaryAndBenefits,
+                visaSponsorship: jobData.visaSponsorship,
+                responsibilities: jobData.responsibilities,
+                requiredSkills: jobData.requiredSkills,
+                preferredSkills: jobData.preferredSkills,
+                description: jobData.description
             },
             debug: {
                 source: 'llm-api',
@@ -335,10 +355,20 @@ function parseLLMResponse(llmResponse, url) {
         const parsed = JSON.parse(jsonStr);
         
         return {
-            title: parsed.title || '',
-            company: parsed.company || '',
-            locations: parsed.locations || '',
-            description: parsed.description || ''
+            title: parsed.title || "",
+            company: parsed.company || "",
+            locations: parsed.locations || "",
+            jobType: parsed.jobType || "",
+            workMode: parsed.workMode || "",
+            experienceLevel: parsed.experienceLevel || "",
+            educationLevel: parsed.educationLevel || "",
+            duration: parsed.duration || "",
+            salaryAndBenefits: parsed.salaryAndBenefits || "",
+            visaSponsorship: parsed.visaSponsorship || "",
+            responsibilities: parsed.responsibilities || "",
+            requiredSkills: parsed.requiredSkills || "",
+            preferredSkills: parsed.preferredSkills || "",
+            description: parsed.description || ""
         };
     } catch (error) {
         console.error('Error parsing LLM response:', error);
@@ -390,6 +420,90 @@ function scrapeJobFromPage() {
         return text;
     }
 
+    // Helper function to extract details from text using keywords and regex
+    function extractDetailsFromText(text) {
+        const details = {
+            jobType: '',
+            workMode: '',
+            experienceLevel: '',
+            educationLevel: '',
+            duration: '',
+            salaryAndBenefits: '',
+            visaSponsorship: '',
+            responsibilities: '',
+            requiredSkills: '',
+            preferredSkills: ''
+        };
+
+        if (!text) return details;
+
+        // Helper to find a section between two headings
+        const getSection = (startRegex, endRegex) => {
+            const startMatch = text.match(startRegex);
+            if (!startMatch) return '';
+            const startIndex = startMatch.index + startMatch[0].length;
+            const remainingText = text.substring(startIndex);
+            const endMatch = remainingText.match(endRegex);
+            const endIndex = endMatch ? endMatch.index : -1;
+            return (endIndex !== -1 ? remainingText.substring(0, endIndex) : remainingText).trim();
+        };
+
+        const lowerText = text.toLowerCase();
+
+        // Job Type
+        if (/\b(full-time|full time)\b/i.test(text)) details.jobType = 'Full-time';
+        else if (/\b(part-time|part time)\b/i.test(text)) details.jobType = 'Part-time';
+        else if (/\b(contract|freelance)\b/i.test(text)) details.jobType = 'Contract';
+        else if (/\b(internship|intern)\b/i.test(text)) details.jobType = 'Internship';
+
+        // Work Mode
+        if (/\b(remote|work from home|wfh)\b/i.test(text)) details.workMode = 'Remote';
+        else if (/\b(hybrid)\b/i.test(text)) details.workMode = 'Hybrid';
+        else if (/\b(on-site|onsite|in office)\b/i.test(text)) details.workMode = 'On-site';
+
+        // Experience Level
+        const expMatch = text.match(/(\d{1,2})\s*(\+|-|to)\s*(\d{1,2})?\s*years?/i) || text.match(/(\d{1,2})\+?\s*years?/i);
+        if (expMatch) {
+            details.experienceLevel = expMatch[0];
+        } else if (/\b(entry-level|entry level|graduate|student)\b/i.test(text)) {
+            details.experienceLevel = 'Entry-level';
+        } else if (/\b(senior-level|senior level|experie\.)\b/i.test(text)) {
+            details.experienceLevel = 'Senior';
+        }
+
+        // Education Level
+        if (/\b(undergraduate|bachelor's|bachelor|bs|ba)\b/i.test(text)) details.educationLevel = "Bachelor's Degree";
+        else if (/\b(master's|master|ms|ma)\b/i.test(text)) details.educationLevel = "Master's Degree";
+        else if (/\b(phd|doctorate)\b/i.test(text)) details.educationLevel = 'PhD';
+
+        // Duration / Start Time
+        const durationMatch = text.match(/(\d+\s*(months?|years?)\s*contract|\b(internship|contract)\b\s*for\s*\d+\s*months?|\b(\w+)-(week|month|year)\s+internship\b)/i);
+        if (durationMatch) details.duration = durationMatch[0];
+
+        // Salary and Benefits
+        const salaryMatch = text.match(/(\$|€|£|CAD)\s?[\d,.]+\s*-\s*(\$|€|£|CAD)?\s?[\d,.]+/i);
+        if (salaryMatch) details.salaryAndBenefits = salaryMatch[0];
+
+        // Visa Sponsorship
+        if (/\b(visa|sponsorship)\b/i.test(text) && !/\b(no|not|unable to)\s+(visa|sponsorship)\b/i.test(text)) details.visaSponsorship = 'Possibly available';
+        if (/\b(no|not|unable to)\s+(visa|sponsorship)\b/i.test(text)) details.visaSponsorship = 'Not available';
+
+        // Section-based extraction (best effort)
+        const allHeadings = /\b(responsibilities|what you'll do|your role|qualifications|requirements|skills|preferred|nice to have|education|experience|who can apply)\b/i;
+
+        details.responsibilities = getSection(
+            /\b(responsibilities|what you'll do|your role|the role|day-to-day)\b/i, allHeadings
+        );
+        details.requiredSkills = getSection(
+            /\b(basic qualifications|requirements|required skills|minimum qualifications|experience|skills|who can apply)\b/i, allHeadings
+        );
+        details.preferredSkills = getSection(
+            /\b(preferred qualifications|preferred skills|nice to have|bonus points)\b/i, allHeadings
+        );
+
+        return details;
+    }
+
     // ===================================================================
     // PLATFORM-SPECIFIC SCRAPERS - Check these first before generic tiers
     // ===================================================================
@@ -438,18 +552,15 @@ function scrapeJobFromPage() {
         }
         
         if (title || description) {
-            return {
-                found: true,
-                job: {
-                    source: window.location.hostname,
-                    url: window.location.href,
-                    title: title,
-                    company: company,
-                    locations: locations,
-                    description: description,
-                },
-                debug
+            const job = {
+                source: window.location.hostname,
+                url: window.location.href,
+                title: title,
+                company: company,
+                locations: locations,
+                description: description,
             };
+            return { found: true, job: { ...job, ...extractDetailsFromText(description) }, debug };
         }
     }
     
@@ -525,18 +636,17 @@ function scrapeJobFromPage() {
         }
 
         if (title || description) {
-            return {
-                found: true,
-                job: {
-                    source: window.location.hostname,
-                    url: window.location.href,
-                    title,
-                    company,
-                    locations,
-                    description
-                },
-                debug
+            const job = {
+                source: window.location.hostname,
+                url: window.location.href,
+                title,
+                company,
+                locations,
+                description
             };
+            return { found: true, 
+                job: { ...job, ...extractDetailsFromText(description) }, 
+                debug };
         }
     }
 
@@ -583,6 +693,17 @@ function scrapeJobFromPage() {
         company: schemaJob?.company || '',
         locations: schemaJob?.location || '',
         description: schemaJob?.description || '',
+        // Initialize new fields for default scraper
+        jobType: '',
+        workMode: '',
+        experienceLevel: '',
+        educationLevel: '',
+        duration: '',
+        salaryAndBenefits: '',
+        visaSponsorship: '',
+        responsibilities: '',
+        requiredSkills: '',
+        preferredSkills: ''
     };
     if (schemaJob) {
         debug.tiers.push('schema');
@@ -785,11 +906,7 @@ function scrapeJobFromPage() {
     // If we found at least a title or description, consider it a job page
     if (jobData.title || jobData.description) {
         debug.source = debug.tiers.join('+') || 'html';
-        return {
-            found: true,
-            job: jobData,
-            debug
-        };
+        return { found: true, job: { ...jobData, ...extractDetailsFromText(jobData.description) }, debug };
     }
 
     // If nothing matched:
@@ -800,11 +917,18 @@ function scrapeJobFromPage() {
 function downloadJobsAsCSV(jobs) {
     if (!jobs || !jobs.length) return;
 
-    const headers = ["Title", "Company", "Locations", "Description", "URL", "Source", "Scraped At"];
+    const headers = [
+        "Title", "Company", "Locations", "Job Type", "Work Mode",
+        "Experience Level", "Education Level", "Duration/Start time",
+        "Salary and Benefits", "Visa Sponsorship", "Responsibility",
+        "Required Skills", "Preferred Skills", "Description",
+        "URL", "Source", "Scraped At"
+    ];
     const csvRows = [];
 
     // Header row
-    csvRows.push(headers.join(","));
+    // Quote headers to be safe
+    csvRows.push(headers.map(h => `"${h}"`).join(","));
 
     // Data rows
     for (const item of jobs) {
@@ -814,6 +938,16 @@ function downloadJobsAsCSV(jobs) {
             jobData.title || "",
             jobData.company || "",
             jobData.locations || "",
+            jobData.jobType || "",
+            jobData.workMode || "",
+            jobData.experienceLevel || "",
+            jobData.educationLevel || "",
+            jobData.duration || "",
+            jobData.salaryAndBenefits || "",
+            jobData.visaSponsorship || "",
+            jobData.responsibilities || "",
+            jobData.requiredSkills || "",
+            jobData.preferredSkills || "",
             jobData.description || "",
             jobData.url || "",
             jobData.source || "",
