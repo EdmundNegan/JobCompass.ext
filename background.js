@@ -153,9 +153,9 @@ async function scrapeJobWithLLM(tabId, settings) {
   "duration": "e.g., '6 months', '1 year contract'",
   "salaryAndBenefits": "Capture any mention of salary, stock options, bonuses, and benefits like health insurance, 401k, etc.",
   "visaSponsorship": "e.g., 'Visa sponsorship available', 'Not available', 'Case-by-case'",
-  "responsibilities": "A bulleted or paragraph list of job responsibilities.",
-  "requiredSkills": "A bulleted or paragraph list of required skills or qualifications.",
-  "preferredSkills": "A bulleted or paragraph list of preferred/bonus skills.",
+  "responsibilities": "A list of job responsibilities, with each item separated by a semicolon ';'.",
+  "requiredSkills": "A list of required skills or qualifications, with each item separated by a semicolon ';'.",
+  "preferredSkills": "A list of preferred/bonus skills, with each item separated by a semicolon ';'.",
   "description": "A clean, readable, and well-formatted version of the full job description, with proper paragraphs and bullet points."
 }
 
@@ -963,8 +963,10 @@ function downloadJobsAsCSV(jobs) {
         csvRows.push(row);
     }
 
+    // Prepend a Byte Order Mark (BOM) to the CSV content to ensure Excel opens it with UTF-8 encoding.
+    const bom = "\uFEFF";
     const csvContent = csvRows.join("\n");
-    const url = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
+    const url = "data:text/csv;charset=utf-8," + encodeURIComponent(bom + csvContent);
 
     chrome.downloads.download(
         {
