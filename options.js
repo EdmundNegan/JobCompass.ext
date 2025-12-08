@@ -14,7 +14,7 @@ const DEFAULT_MODELS = {
 
 // Load saved settings
 document.addEventListener('DOMContentLoaded', () => {
-    chrome.storage.local.get(['llmSettings'], (data) => {
+    chrome.storage.sync.get(['llmSettings', 'downloadOption'], (data) => {
         const settings = data.llmSettings || {};
         
         document.getElementById('useLLM').checked = settings.enabled || false;
@@ -22,6 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('apiKey').value = settings.apiKey || '';
         document.getElementById('model').value = settings.model || '';
         
+        // Load download option
+        const downloadSelect = document.getElementById('downloadOption');
+        downloadSelect.value = data.downloadOption || 'everytime';
+
         updateLLMSettingsVisibility();
     });
 });
@@ -71,6 +75,9 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         apiKey: document.getElementById('apiKey').value.trim(),
         model: document.getElementById('model').value.trim()
     };
+
+    // Get download option
+    const downloadOption = document.getElementById('downloadOption').value;
     
     // Validate if LLM is enabled
     if (settings.enabled) {
@@ -103,7 +110,11 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         }
     }
     
-    chrome.storage.local.set({ llmSettings: settings }, () => {
+        // Save both LLM settings and download option
+    chrome.storage.sync.set({ 
+        llmSettings: settings,
+        downloadOption: downloadOption 
+    }, () => {
         showStatus('Settings saved successfully!', 'success');
         saveBtn.disabled = false;
         saveBtn.textContent = originalText;

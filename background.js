@@ -80,28 +80,27 @@ async function handleScrapeRequest(tabId, method, llmSettings) {
         // Add scraped timestamp
         job.job.scrapedAt = new Date().toISOString();
 
-        // Save the job to local storage
-        return new Promise((resolve) => {
-            chrome.storage.local.get({ jobs: [] }, (data) => {
-                const jobs = data.jobs;
-                jobs.push(job);
-                
-                chrome.storage.local.set({ jobs }, () => {
-                    console.log("Job saved. Total jobs:", jobs.length);
+        // Save the job and handle post-save actions
+        const data = await chrome.storage.local.get({ jobs: [] });
+        const jobs = data.jobs;
+        jobs.push(job);
+        
+        await chrome.storage.local.set({ jobs });
+        console.log("Job saved. Total jobs:", jobs.length);
 
-                    // Show count of saved jobs on the badge
-                    chrome.action.setBadgeText({
-                        tabId: tabId,
-                        text: String(jobs.length),
-                    });
-
-                    // Generate/Download CSV everytime 
-                    downloadJobsAsCSV(jobs);
-                    
-                    resolve({ success: true, jobCount: jobs.length });
-                });
-            });
+        // Show count of saved jobs on the badge
+        await chrome.action.setBadgeText({
+            tabId: tabId,
+            text: String(jobs.length),
         });
+
+        // Check download option before downloading CSV
+        const options = await chrome.storage.sync.get({ downloadOption: 'everytime' });
+        if (options.downloadOption === 'everytime') {
+            downloadJobsAsCSV(jobs);
+        }
+
+        return { success: true, jobCount: jobs.length };
     } catch (error) {
         console.error("Error scraping job:", error);
         throw error;

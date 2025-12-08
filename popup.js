@@ -11,11 +11,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
+// Helper to manage button loading state
+function setButtonLoading(btn, isLoading, loadingText) {
+    const btnText = btn.querySelector('.btn-text');
+    if (isLoading) {
+        btn.classList.add('loading');
+        btn.disabled = true;
+        btnText.textContent = loadingText;
+    } else {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+        btnText.textContent = btn.dataset.originalText;
+    }
+}
+
 // Scrape with default method
 document.getElementById('scrapeDefault').addEventListener('click', async () => {
     const btn = document.getElementById('scrapeDefault');
-    btn.classList.add('loading');
-    btn.disabled = true;
+    btn.dataset.originalText = btn.querySelector('.btn-text').textContent;
+    setButtonLoading(btn, true, 'Scraping...');
     
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -31,8 +45,7 @@ document.getElementById('scrapeDefault').addEventListener('click', async () => {
             method: 'default',
             tabId: tab.id
         }, (response) => {
-            btn.classList.remove('loading');
-            btn.disabled = false;
+            setButtonLoading(btn, false);
             
             if (chrome.runtime.lastError) {
                 showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
@@ -40,17 +53,22 @@ document.getElementById('scrapeDefault').addEventListener('click', async () => {
             }
             
             if (response && response.success) {
-                showStatus('Job scraped and saved successfully!', 'success');
-                setTimeout(() => {
-                    window.close();
-                }, 1500);
+                // Check download option to show the correct message
+                chrome.storage.sync.get({ downloadOption: 'everytime' }, (options) => {
+                    const message = options.downloadOption === 'everytime'
+                        ? 'Job scraped and downloaded to your device!'
+                        : 'Job scraped and saved to the backend!';
+                    showStatus(message, 'success');
+                    setTimeout(() => {
+                        window.close();
+                    }, 1500);
+                });
             } else {
                 showStatus(response?.error || 'Failed to scrape job', 'error');
             }
         });
     } catch (error) {
-        btn.classList.remove('loading');
-        btn.disabled = false;
+        setButtonLoading(btn, false);
         showStatus('Error: ' + error.message, 'error');
     }
 });
@@ -58,8 +76,8 @@ document.getElementById('scrapeDefault').addEventListener('click', async () => {
 // Scrape with LLM API
 document.getElementById('scrapeLLM').addEventListener('click', async () => {
     const btn = document.getElementById('scrapeLLM');
-    btn.classList.add('loading');
-    btn.disabled = true;
+    btn.dataset.originalText = btn.querySelector('.btn-text').textContent;
+    setButtonLoading(btn, true, 'Scraping with LLM...');
     
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -75,8 +93,7 @@ document.getElementById('scrapeLLM').addEventListener('click', async () => {
         
         if (!llmSettings || !llmSettings.enabled || !llmSettings.apiKey) {
             showStatus('Please configure LLM API in Options first', 'error');
-            btn.classList.remove('loading');
-            btn.disabled = false;
+            setButtonLoading(btn, false);
             return;
         }
         
@@ -87,8 +104,7 @@ document.getElementById('scrapeLLM').addEventListener('click', async () => {
             tabId: tab.id,
             settings: llmSettings
         }, (response) => {
-            btn.classList.remove('loading');
-            btn.disabled = false;
+            setButtonLoading(btn, false);
             
             if (chrome.runtime.lastError) {
                 showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
@@ -96,18 +112,23 @@ document.getElementById('scrapeLLM').addEventListener('click', async () => {
             }
             
             if (response && response.success) {
-                showStatus('Job scraped with LLM and saved successfully!', 'success');
-                setTimeout(() => {
-                    window.close();
-                }, 1500);
+                // Check download option to show the correct message
+                chrome.storage.sync.get({ downloadOption: 'everytime' }, (options) => {
+                    const message = options.downloadOption === 'everytime'
+                        ? 'Job scraped with LLM and downloaded to your device!'
+                        : 'Job scraped with LLM and saved to the backend!';
+                    showStatus(message, 'success');
+                    setTimeout(() => {
+                        window.close();
+                    }, 1500);
+                });
             } else {
                 const errorMsg = response?.error || 'Failed to scrape job with LLM';
                 showStatus('LLM Scraping Failed: ' + errorMsg, 'error');
             }
         });
     } catch (error) {
-        btn.classList.remove('loading');
-        btn.disabled = false;
+        setButtonLoading(btn, false);
         showStatus('Error: ' + error.message, 'error');
     }
 });
@@ -142,4 +163,3 @@ function showStatus(message, type) {
         }, 3000);
     }
 }
-
