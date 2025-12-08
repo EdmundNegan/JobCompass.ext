@@ -3,11 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JobCompass Options</title>
+    <title>JobCompass Settings</title>
     <style>
+        :root {
+            --primary-color: #4CAF50;
+            --secondary-color: #2196F3;
+            --border-color: #ddd;
+            --background-color: #f9f9f9;
+            --text-color: #333;
+            --label-color: #555;
+            --input-bg: #fff;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            max-width: 600px;
+            max-width: 900px;
             margin: 40px auto;
             padding: 20px;
             background: #f5f5f5;
@@ -21,124 +31,493 @@
         h1 {
             margin-top: 0;
             color: #333;
+            text-align: center;
         }
-        .section {
-            margin-bottom: 30px;
-        }
-        .section h2 {
+
+        h2, h3 {
             font-size: 18px;
-            margin-bottom: 15px;
+            margin-top: 30px;
+            margin-bottom: 30px;
             color: #555;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 8px;
         }
-        label {
-            display: block;
-            margin-bottom: 8px;
+
+        .form-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
             font-weight: 500;
             color: #333;
+            flex-basis: 140px;
         }
-        input, select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
+
+        .form-group input[type="text"],
+        .form-group input[type="password"],
+        .form-group select {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             font-size: 14px;
             box-sizing: border-box;
         }
-        input:focus, select:focus {
-            outline: none;
-            border-color: #4CAF50;
+
+        #llmSettings {
+            padding-left: 20px;
+            border-left: 3px solid #f0f0f0;
+            margin-top: 16px;
         }
-        .checkbox-group {
-            display: flex;
-            align-items: center;
-            margin-bottom: 15px;
-        }
-        .checkbox-group input[type="checkbox"] {
-            width: auto;
-            margin-right: 10px;
-        }
+
         .help-text {
             font-size: 12px;
             color: #666;
-            margin-top: 5px;
+            margin-top: -8px;
+            margin-bottom: 24px;
+            flex-basis: 100%;
+            margin-left: 150px;
         }
-        button {
+
+        button#saveBtn {
+            width: 100%;
+            padding: 12px;
             background: #4CAF50;
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 4px;
-            font-size: 14px;
-            cursor: pointer;
+            border-radius: 6px;
+            font-size: 15px;
             font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
         }
-        button:hover {
+
+        button#saveBtn:hover:not(:disabled) {
             background: #45a049;
         }
+
         .status {
             margin-top: 15px;
             padding: 10px;
             border-radius: 4px;
             display: none;
+            text-align: center;
         }
+
         .status.success {
             background: #d4edda;
             color: #155724;
             border: 1px solid #c3e6cb;
         }
+
         .status.error {
             background: #f8d7da;
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
+
+        .divider {
+            height: 1px;
+            background: #eee;
+            margin: 24px 0;
+        }
+
+        /* Scoring Logic Styles */
+        .desirability-grid {
+            display: grid;
+            grid-template-columns: 130px 1fr 320px;
+            gap: 20px;
+            align-items: center;
+        }
+
+        /* Responsive layout for desirability grid */
+        @media (max-width: 800px) {
+            .desirability-grid {
+                grid-template-columns: 150px 1fr; /* Switch to 2 columns */
+                row-gap: 10px;
+            }
+            .desirability-grid .scoring-header:nth-child(3) { /* Hide the 'priority' header */
+                display: none;
+            }
+            .desirability-grid .scoring-row .priority-selector {
+                grid-column: 1 / -1; /* Make priority selector span all columns */
+            }
+        }
+
+        .scoring-header {
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--label-color);
+            text-transform: none;
+            padding-bottom: 5px;
+        }
+
+        .scoring-row {
+            display: contents; /* Makes children direct members of the grid */
+        }
+
+        .scoring-row .category-label {
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .scoring-row input[type="text"],
+        .scoring-row select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .scoring-row input::placeholder {
+            color: #aaa;
+            font-style: italic;
+            font-size: 13px;
+        }
+
+        #llmScoringSettings {
+            display: none;
+            padding-left: 20px;
+            border-left: 3px solid #f0f0f0;
+            margin-top: 16px;
+        }
+
+        .scoring-row select:disabled {
+            background-color: #f5f5f5;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .priority-selector {
+            display: flex;
+            justify-content: space-between;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .priority-option {
+            flex: 1;
+            padding: 6px 2px;
+            text-align: center;
+            font-size: 11px;
+            cursor: pointer;
+            background-color: #f8f8f8;
+            color: #555;
+            border-right: 1px solid #eee;
+            transition: background-color 0.2s;
+            user-select: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .priority-option:last-child {
+            border-right: none;
+        }
+        .priority-option:hover {
+            background-color: #e9e9e9;
+        }
+        .priority-option.selected {
+            color: white;
+            font-weight: 600;
+        }
+        .priority-option[data-value="mandatory"].selected { background-color: #6200EA; }
+        .priority-option[data-value="high"].selected { background-color: #2962FF; }
+        .priority-option[data-value="medium"].selected { background-color: #6692FF; }
+        .priority-option[data-value="low"].selected { background-color: #9EBCFF; }
+        .priority-option[data-value="exclude"].selected { background-color: #94A3B8; }
+
+        .priority-selector.disabled .priority-option {
+            cursor: not-allowed;
+            background-color: #f5f5f5 !important;
+            color: #bbb !important;
+        }
+
+        #custom-categories-container {
+            margin-top: 10px;
+        }
+
+        .btn-secondary {
+            padding: 8px 12px;
+            background: var(--secondary-color);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 13px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .custom-category-row input.category-name-input {
+            font-weight: 500;
+        }
+    </style>
+    <style>
+        /* Additional styles for eligibility percentage input */
+        .weight-input-container {
+            display: flex;
+            align-items: center;
+        }
+        .weight-input-container input {
+            width: 60px;
+            text-align: right;
+        }
+        .weight-input-container span {
+            margin-left: 5px;
+            font-weight: 500;
+        }
+        .eligibility-grid {
+            display: grid;
+            grid-template-columns: 130px 300px;
+            gap: 10px;
+        }
+
+        /* Overall Suggestion Styles */
+        .overall-control {
+            flex-grow: 1;
+        }
+        .overall-label {
+            font-weight: 500;
+            font-size: 14px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .overall-container {
+            position: relative;
+            width: 100%;
+            height: 20px;
+            padding: 8px 0;
+        }
+        .overall-track {
+            position: absolute;
+            width: 100%;
+            height: 6px;
+            background-color: #e0e0e0;
+            border-radius: 3px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+        .overall-thumb {
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            background-color: var(--secondary-color);
+            border-radius: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            cursor: grab;
+        }
+        .overall-thumb:active {
+            cursor: grabbing;
+        }
+        .overall-ruler {
+            position: absolute;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            top: 25px;
+            font-size: 11px;
+            color: #999;
+        }
+        .overall-ruler span {
+            position: relative;
+            display: inline-block;
+        }
+        .overall-ruler span::before {
+            content: '|';
+            position: absolute;
+            top: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .overall-group .help-text {
+            margin-left: 0; /* Reset margin for this specific help text */
+            margin-top: 10px;
+            margin-bottom: 0;
+        }
+        
+        .full-width-help {
+            margin-left: 0;
+            flex-basis: 100%;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+            margin-bottom: 15px; /* Adjusted from h3 default */
+        }
+        .section-header h3 {
+            margin-top: 0;
+            margin-bottom: 0;
+            border-bottom: none;
+            padding-bottom: 8px;
+        }
+        .btn-reset {
+            padding: 4px 10px;
+            font-size: 12px;
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            color: #555;
+        }
+        
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>JobCompass Options</h1>
+        <h1>JobCompass Settings</h1>
         
-        <div class="section">
-            <h2>Scraping Method</h2>
-            <div class="checkbox-group">
+
+        <h2>General Settings</h2>
+        <div class="form-group">
+            <label for="downloadOption">Download Trigger</label>
+            <select id="downloadOption">
+                <option value="everytime">After every scrape (Default)</option>
+                <option value="manual">Only when clicking "View Saved Jobs"</option>
+            </select>
+        </div>
+        <div class="help-text">Configures the trigger for local file downloads.
+             Scraped data persists in the backend independent of local file generation.</div>
+
+        <div class="divider"></div>
+        <h2>LLM Scraper Settings</h2>
+        <div class="form-group">
+            <label for="useLLM">Use LLM for Scraping</label>
+            <div style="flex-grow: 1; display: flex; align-items: center;">
                 <input type="checkbox" id="useLLM">
-                <label for="useLLM">Use LLM API for scraping</label>
-            </div>
-            <div class="help-text">
-                When enabled, the extension will use an LLM API to extract job information from pages. Otherwise, it uses the default DOM-based scraping method.
             </div>
         </div>
+        <div class="help-text">When enabled, the extension will use an LLM API 
+            to extract job information from pages. Otherwise, it uses the 
+            default DOM-based scraping method.</div>
 
-        <div class="section" id="llmSettings">
-            <h2>LLM API Configuration</h2>
-            
-            <label for="apiProvider">API Provider</label>
-            <select id="apiProvider">
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="gemini">Google Gemini</option>
-            </select>
+        <div id="llmSettings" style="display: none;">
+            <h3 style="margin-top: 20px; margin-bottom: 20px;">LLM API Configuration</h3>
+            <div class="form-group">
+                <label for="apiProvider">API Provider</label>
+                <select id="apiProvider">
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="gemini">Google Gemini</option>
+                </select>
+            </div>
             <div class="help-text">Select your LLM API provider. The endpoint will be automatically configured.</div>
-
-            <label for="apiKey" style="margin-top: 15px;">API Key</label>
-            <input type="password" id="apiKey" placeholder="sk-..., sk-ant-..., or AIza...">
-            <div class="help-text">Your API key (stored locally, never shared)</div>
-
-            <label for="model" style="margin-top: 15px;">Model</label>
-            <input type="text" id="model" placeholder="gpt-4, gpt-3.5-turbo, claude-3-opus, gemini-2.0-flash, etc.">
+            <div class="form-group">
+                <label for="apiKey">API Key</label>
+                <input type="password" id="apiKey" placeholder="sk-..., sk-ant-..., or AIza...">
+            </div>
+            <div class="help-text">Your API key is stored locally and never shared.</div>
+            <div class="form-group">
+                <label for="model">Model</label>
+                <input type="text" id="model" placeholder="e.g., gpt-4, claude-3-sonnet, gemini-pro">
+            </div>
             <div class="help-text">Model name (e.g., gpt-4, gpt-3.5-turbo, claude-3-opus-20240229, gemini-2.0-flash)</div>
         </div>
 
-        <div class="section">
-            <h2>Preference</h2>
-            <label for="downloadOption">Download Trigger</label>
-            <select id="downloadOption">
-                <option value="everytime" selected>Download after every scrape (Default)</option>
-                <option value="manual">Download only when clicking "View Saved Jobs"</option>
-            </select>
-            <div class="help-text">
-                Configures the trigger for local file downloads. Scraped data persists in the backend independent of local file generation.
+
+        <div class="divider"></div>
+        <h2>LLM Scoring Settings</h2>
+        <div class="form-group">
+            <label for="useLLMScoring">Use LLM for Scoring</label>
+            <div style="flex-grow: 1; display: flex; align-items: center;">
+                <input type="checkbox" id="useLLMScoring">
             </div>
         </div>
+        <div class="help-text">When enabled, the LLM will score jobs based on 
+            your preferences.
+        </div>
+
+        <div id="llmScoringSettings">
+            
+            <div class="section-header" style="margin-top: 0;">
+                <h3>Desirability Criteria</h3>
+                <button id="reset-desirability" class="btn-reset">Reset</button>
+            </div>
+            <div class="help-text full-width-help" style="margin-bottom: 15px; margin-top: -15px;">
+                Define the importance of each category. The LLM will score jobs based on your priorities.
+                <br><br>
+                <strong>Note:</strong>
+                <ul style="margin-top: 5px; padding-left: 20px;">
+                    <li>"<strong>Mandatory</strong>" items that are not met will result in a Desirability score of 0.</li>
+                    <li>"<strong>Exclude</strong>" items will not be considered in the score.</li>
+                </ul>
+            </div>
+            <div class="desirability-grid" id="desirability-grid">
+                <!-- Headers -->
+                <div class="scoring-header">Category</div>
+                <div class="scoring-header">Your Preference (Freetext)</div>
+                <div class="scoring-header">Priority</div>
+
+                <!-- Default Categories will be added here by JS -->
+            </div>
+            <div id="custom-categories-container"></div> <!-- This container is no longer used but kept for safety -->
+            
+
+            <div class="section-header" style="margin-top: 30px;">
+                <h3>Eligibility Criteria</h3>
+                <button id="reset-eligibility" class="btn-reset">Reset</button>
+            </div>
+            <p class="help-text full-width-help" style="margin-bottom: 15px; margin-top: -15px;">Upload your resume/CV to automatically check for eligibility against job requirements.<br>Set the weight for each category to determine the eligibility score. The total should ideally be 100%.</p>
+            <button id="upload-resume-btn" class="btn-secondary">Upload Files</button>
+            <div class="eligibility-grid" id="eligibility-grid" style="margin-top: 20px;">
+                <!-- Headers -->
+                <div class="scoring-header">Category</div>
+                <div class="scoring-header">Weight (% of Total Eligibility Score)</div>
+
+                <!-- Eligibility Categories will be added here by JS -->
+            </div>
+
+            <div class="section-header" style="margin-top: 30px;">
+                <h3>Suggestion Criteria</h3>
+                <!-- No reset button needed here -->
+            </div>
+            <div class="help-text full-width-help" style="margin-top: -15px; margin-bottom: 20px;">
+                The system suggests 'Apply' if the combined score is above the threshold, and 'Skip' if it falls below.
+            </div>
+            <div class="overall-group">
+                <div class="form-group">
+                    <label for="weight-overall">Score Weights</label>
+                    <div class="overall-control">
+                        <div class="overall-label">
+                            <span>Desirability: <b id="desirability-weight-label">70</b>%</span>
+                            <span>Eligibility: <b id="eligibility-weight-label">30</b>%</span>
+                        </div>
+                        <div class="overall-container" id="weight-overall">
+                            <div class="overall-track"></div>
+                            <div class="overall-thumb" id="weight-thumb"></div>
+                            <div class="overall-ruler">
+                                <span>0</span><span>20</span><span>40</span><span>60</span><span>80</span><span>100</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top: 30px;">
+                    <label for="threshold-overall">Score Threshold</label>
+                    <div class="overall-control">
+                        <div class="overall-label">
+                            <span>Threshold: <b id="threshold-label">70</b></span>
+                        </div>
+                        <div class="overall-container" id="threshold-overall">
+                            <div class="overall-track"></div>
+                            <div class="overall-thumb" id="threshold-thumb"></div>
+                            <div class="overall-ruler">
+                                <span>0</span><span>20</span><span>40</span><span>60</span><span>80</span><span>100</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="divider"></div>
 
         <button id="saveBtn">Save Settings</button>
         <div id="status" class="status"></div>

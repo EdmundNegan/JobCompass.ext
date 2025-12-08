@@ -7,7 +7,7 @@ chrome.runtime.onInstalled.addListener(() => {
     // Create context menu item for options
     chrome.contextMenus.create({
         id: 'openOptions',
-        title: 'JobCompass Options',
+        title: 'JobCompass Settings',
         contexts: ['action']
     });
 });
