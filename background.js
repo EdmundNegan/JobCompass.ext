@@ -22,7 +22,7 @@ chrome.contextMenus.onClicked.addListener((info) => {
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'scrape') {
-        handleScrapeRequest(request.tabId, request.method, request.settings)
+        handleScrapeRequest(request.tabId, request.method, request.settings, request.score)
             .then((result) => {
                 sendResponse(result);
             })
@@ -44,10 +44,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
+
+    if (request.action === 'scoreSavedJobs') {
+        scoreDesirabilityWithLLM('missing')
+            .then(async () => {
+                const options = await chrome.storage.sync.get({ downloadOption: 'any_scrape' });
+                if (options.downloadOption === 'any_score') {
+                    const data = await chrome.storage.local.get({ jobs: [] });
+                    downloadJobsAsCSV(data.jobs);
+                }
+                sendResponse({ success: true });
+            })
+            .catch((error) => sendResponse({ success: false, error: error.message }));
+        return true;
+    }
 });
 
 // Function to handle scrape requests from popup
-async function handleScrapeRequest(tabId, method, llmSettings) {
+async function handleScrapeRequest(tabId, method, llmSettings, triggerScore = false) {
     if (!tabId) {
         throw new Error('No tab ID provided');
     }
@@ -82,10 +96,23 @@ async function handleScrapeRequest(tabId, method, llmSettings) {
 
         // Save the job and handle post-save actions
         const data = await chrome.storage.local.get({ jobs: [] });
-        const jobs = data.jobs;
+        let jobs = data.jobs;
         jobs.push(job);
         
         await chrome.storage.local.set({ jobs });
+
+        // Score the job only if requested (Scrape & Score button)
+        try {
+            if (triggerScore) {
+                await scoreDesirabilityWithLLM('latest', llmSettings);
+                // Refresh jobs from storage to get the score for CSV download
+                const updatedData = await chrome.storage.local.get({ jobs: [] });
+                jobs = updatedData.jobs;
+            }
+        } catch (err) {
+            console.error("Error during scoring:", err);
+        }
+
         console.log("Job saved. Total jobs:", jobs.length);
 
         // Show count of saved jobs on the badge
@@ -95,8 +122,12 @@ async function handleScrapeRequest(tabId, method, llmSettings) {
         });
 
         // Check download option before downloading CSV
-        const options = await chrome.storage.sync.get({ downloadOption: 'everytime' });
-        if (options.downloadOption === 'everytime') {
+        const settings = await chrome.storage.sync.get({ downloadOption: 'any_scrape' });
+        const opt = settings.downloadOption;
+        
+        if (opt === 'any_scrape' || 
+           (opt === 'scrape_and_score' && triggerScore) || 
+           (opt === 'any_score' && triggerScore)) {
             downloadJobsAsCSV(jobs);
         }
 
@@ -227,6 +258,170 @@ Return ONLY valid JSON, no additional text or markdown formatting.`;
         console.error('LLM scraping error:', error);
         // Don't fallback - throw error so user sees the failure message
         throw error;
+    }
+}
+
+// Function to score desirability using LLM
+async function scoreDesirabilityWithLLM(target = 'latest', providedLlmSettings = null) {
+    try {
+        // 1. Get Jobs
+        const data = await chrome.storage.local.get({ jobs: [] });
+        const jobs = data.jobs;
+        if (jobs.length === 0) return;
+
+        // 2. Get Settings
+        const settingsData = await chrome.storage.sync.get(['scoringSettings', 'llmSettings']);
+        const scoringSettings = settingsData.scoringSettings;
+        
+        // Use provided settings (from scrape request) or fall back to stored settings
+        const llmSettings = providedLlmSettings || settingsData.llmSettings;
+
+        if (!scoringSettings || !scoringSettings.enabled || !scoringSettings.desirabilityCriteria) {
+            console.log("Scoring disabled or no criteria found.");
+            return;
+        }
+
+        if (!llmSettings || !llmSettings.apiKey) {
+            console.error("No API settings available for scoring.");
+            return;
+        }
+
+        // 3. Identify target jobs
+        let indicesToScore = [];
+        if (target === 'latest') {
+            indicesToScore.push(jobs.length - 1);
+        } else {
+            // Score all jobs that don't have a score yet or missing summary
+            jobs.forEach((job, index) => {
+                if (job.job && (job.job.desirabilityScore === undefined || job.job.desirabilityScore === null || !job.job.desirabilitySummary)) {
+                    indicesToScore.push(index);
+                }
+            });
+        }
+
+        if (indicesToScore.length === 0) return;
+
+        // 4. Process each job
+        for (const index of indicesToScore) {
+            const jobWrapper = jobs[index];
+            const job = jobWrapper.job;
+            const criteria = scoringSettings.desirabilityCriteria.filter(c => c.priority !== 'exclude');
+
+            if (criteria.length === 0) continue;
+
+            // Construct Prompt
+            const criteriaText = criteria.map(c => `- Category: "${c.name}", Preference: "${c.preference}", Priority: "${c.priority}"`).join('\n');
+            
+            const prompt = `Evaluate the following job against the user's desirability criteria.
+            
+Job Details:
+Title: ${job.title}
+Company: ${job.company}
+Location: ${job.locations}
+Type: ${job.jobType}
+Work Mode: ${job.workMode}
+Experience Level: ${job.experienceLevel}
+Education Level: ${job.educationLevel}
+Duration: ${job.duration}
+Salary and Benefits: ${job.salaryAndBenefits}
+Visa Sponsorship: ${job.visaSponsorship}
+Responsibilities: ${job.responsibilities}
+Required Skills: ${job.requiredSkills}
+Preferred Skills: ${job.preferredSkills}
+URL: ${job.url}
+Source: ${job.source}
+
+User Criteria:
+${criteriaText}
+
+Scoring Logic:
+1. If the information for a category does not exist in the job details, extract information based on Description.
+2. For 'mandatory' priority: if the job clearly does not match the preference, return 0. Else return 50.
+3. For other priorities: rate the match from 0 to 100 based on the preference.
+
+Return a JSON object with:
+1. "scores": array of objects with "name" (category name) and "score" (number).
+2. "summary": a brief summary (max 2 sentences) explaining the key reasons for the score (highlighting high matches and major gaps).
+
+Example: { "scores": [{ "name": "Role category", "score": 80 }, ...], "summary": "Strong match for role and location, but salary information is missing." }
+Return ONLY valid JSON.`;
+
+            // Call LLM
+            let response;
+            if (llmSettings.provider === 'anthropic') {
+                response = await callAnthropicAPI(llmSettings, prompt);
+            } else if (llmSettings.provider === 'openai') {
+                response = await callOpenAIAPI(llmSettings, prompt);
+            } else if (llmSettings.provider === 'gemini') {
+                response = await callGeminiAPI(llmSettings, prompt);
+            }
+
+            // Parse and Calculate
+            const scoresData = parseLLMScoringResponse(response);
+            const calculation = calculateWeightedScore(scoresData, criteria);
+            
+            // Update Job
+            jobs[index].job.desirabilityScore = calculation.finalScore;
+            jobs[index].job.desirabilityBreakdown = calculation.breakdown;
+            jobs[index].job.desirabilitySummary = scoresData.summary || "";
+            
+            console.log(`Job scored: ${calculation.finalScore}`);
+        }
+
+        // 5. Save Jobs
+        await chrome.storage.local.set({ jobs });
+
+    } catch (e) {
+        console.error("Error in scoreDesirabilityWithLLM:", e);
+    }
+}
+
+function calculateWeightedScore(aiScores, criteria) {
+    const PRIORITY_WEIGHTS = { 'high': 3, 'medium': 2, 'low': 1, 'mandatory': 0, 'exclude': 0 };
+    const scoreMap = {};
+    if (aiScores && aiScores.scores) {
+        aiScores.scores.forEach(s => { if (s.name) scoreMap[s.name] = s.score; });
+    }
+
+    let totalWeightedScore = 0;
+    let totalWeight = 0;
+    let mandatoryFailed = false;
+    const breakdown = [];
+
+    for (const criterion of criteria) {
+        const name = criterion.name;
+        const priority = criterion.priority.toLowerCase();
+        const score = (scoreMap[name] !== undefined) ? scoreMap[name] : 50; // Default 50 if missing
+        const weight = PRIORITY_WEIGHTS[priority] !== undefined ? PRIORITY_WEIGHTS[priority] : 0;
+
+        breakdown.push({ category: name, priority: priority, score: score, weight: weight });
+
+        if (priority === 'mandatory') {
+            if (score === 0) mandatoryFailed = true;
+        } else if (priority !== 'exclude') {
+            totalWeightedScore += (score * weight);
+            totalWeight += weight;
+        }
+    }
+
+    if (mandatoryFailed) return { finalScore: 0, breakdown };
+    
+    // Logic: sum of % of Total Score * Score by AI
+    // This simplifies to: Sum(Score * Weight) / Sum(Weight)
+    const finalScore = totalWeight > 0 ? Math.round(totalWeightedScore / totalWeight) : 0;
+    return { finalScore, breakdown };
+}
+
+function parseLLMScoringResponse(response) {
+    try {
+        let jsonStr = response.trim();
+        jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+        if (jsonMatch) jsonStr = jsonMatch[0];
+        return JSON.parse(jsonStr);
+    } catch (e) {
+        console.error("Error parsing scoring response", e);
+        return { scores: [], summary: "" };
     }
 }
 
@@ -921,7 +1116,8 @@ function downloadJobsAsCSV(jobs) {
         "Experience Level", "Education Level", "Duration/Start time",
         "Salary and Benefits", "Visa Sponsorship", "Responsibility",
         "Required Skills", "Preferred Skills", "Description",
-        "URL", "Source", "Scraped At"
+        "URL", "Source", "Scraped At",
+        "Desirability Score", "Desirability Summary"
     ];
     const csvRows = [];
 
@@ -933,6 +1129,17 @@ function downloadJobsAsCSV(jobs) {
     for (const item of jobs) {
         if (!item || !item.job) continue; // Skip invalid items
         const jobData = item.job;
+
+        let desirabilitySummaryCombined = jobData.desirabilitySummary || "";
+        if (jobData.desirabilityBreakdown && Array.isArray(jobData.desirabilityBreakdown)) {
+            const breakdownStr = jobData.desirabilityBreakdown
+                .map(b => `${b.category}: ${b.score}`)
+                .join(", ");
+            if (breakdownStr) {
+                desirabilitySummaryCombined = `[${breakdownStr}] ${desirabilitySummaryCombined}`;
+            }
+        }
+
         const row = [
             jobData.title || "",
             jobData.company || "",
@@ -950,7 +1157,9 @@ function downloadJobsAsCSV(jobs) {
             jobData.description || "",
             jobData.url || "",
             jobData.source || "",
-            jobData.scrapedAt || ""
+            jobData.scrapedAt || "",
+            jobData.desirabilityScore !== undefined ? jobData.desirabilityScore : "",
+            desirabilitySummaryCombined
         ].map((value) => {
             value = String(value);
             // Escape double quotes

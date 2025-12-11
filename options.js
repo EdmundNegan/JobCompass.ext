@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Load download option
         const downloadSelect = document.getElementById('downloadOption');
-        downloadSelect.value = data.downloadOption || 'everytime';
+        downloadSelect.value = data.downloadOption;
 
         // Load scoring settings
         const scoringSettings = data.scoringSettings || {};
@@ -180,14 +180,42 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     }
     
     // Collect scoring settings
+    const desirabilityRows = document.querySelectorAll('#desirability-grid .scoring-row');
+    const desirabilityCriteria = [];
+    
+    desirabilityRows.forEach(row => {
+        let name = '';
+        const labelDiv = row.querySelector('.category-label');
+        if (labelDiv) {
+            name = labelDiv.textContent;
+        } else {
+            const nameInput = row.querySelector('.category-name-input');
+            if (nameInput) name = nameInput.value;
+        }
+        
+        const preferenceInput = row.querySelector('input[type="text"]:not(.category-name-input)');
+        const prioritySelector = row.querySelector('.priority-selector');
+        
+        if (name && preferenceInput && prioritySelector && preferenceInput.value.trim() !== '') {
+             desirabilityCriteria.push({
+                name: name,
+                preference: preferenceInput.value,
+                priority: prioritySelector.dataset.value
+             });
+        }
+    });
+
     const scoringSettings = {
         enabled: document.getElementById('useLLMScoring').checked,
+        desirabilityCriteria: desirabilityCriteria
     };
 
     // Validate Scoring Settings before saving
     const scoringValidation = validateScoringSettings();
     if (!scoringValidation.isValid) {
         showStatus(scoringValidation.message, 'error');
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalText;
         return;
     }
     
