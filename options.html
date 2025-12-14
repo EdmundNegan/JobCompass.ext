@@ -28,10 +28,21 @@
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+        .header-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .logo {
+            width: 48px;
+            height: 48px;
+        }
         h1 {
-            margin-top: 0;
+            margin: 0;
             color: #333;
-            text-align: center;
+            font-size: 28px;
         }
 
         h2, h3 {
@@ -374,7 +385,10 @@
 </head>
 <body>
     <div class="container">
-        <h1>JobCompass Settings</h1>
+        <div class="header-container">
+            <img src="images/JobCompass.png" alt="JobCompass Logo" class="logo">
+            <h1>JobCompass Settings</h1>
+        </div>
         
 
         <h2>General Settings</h2>
