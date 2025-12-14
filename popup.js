@@ -1,8 +1,8 @@
 // Check if LLM is configured
 document.addEventListener('DOMContentLoaded', async () => {
     // Retrieve settings from sync storage (matching options.js)
-    const data = await chrome.storage.sync.get(['llmSettings', 'scoringSettings']);
-    const llmSettings = data.llmSettings;
+    const data = await chrome.storage.sync.get(['llmScraperSettings', 'scoringSettings']);
+    const llmSettings = data.llmScraperSettings;
     const scoringSettings = data.scoringSettings;
     
     const scrapeLLMBtn = document.getElementById('scrapeLLM');
@@ -113,8 +113,8 @@ document.getElementById('scrapeLLM').addEventListener('click', async () => {
         }
         
         // Get LLM settings
-        const settings = await chrome.storage.sync.get(['llmSettings']);
-        const llmSettings = settings.llmSettings; // Ensure we get it from sync
+        const settings = await chrome.storage.sync.get(['llmScraperSettings']);
+        const llmSettings = settings.llmScraperSettings; // Ensure we get it from sync
         
         if (!llmSettings || !llmSettings.enabled || !llmSettings.apiKey) {
             showStatus('Please configure LLM API in Options first', 'error');
@@ -175,8 +175,8 @@ if (scrapeAndScoreBtn) {
             }
             
             // Get LLM settings
-            const settings = await chrome.storage.sync.get(['llmSettings']);
-            const llmSettings = settings.llmSettings; // Ensure we get it from sync
+            const settings = await chrome.storage.sync.get(['llmScraperSettings']);
+            const llmSettings = settings.llmScraperSettings; // Ensure we get it from sync
             
             if (!llmSettings || !llmSettings.enabled || !llmSettings.apiKey) {
                 showStatus('Please configure LLM API in Options first', 'error');
@@ -266,6 +266,20 @@ document.getElementById('viewJobs').addEventListener('click', async (e) => {
             showStatus('No jobs to download', 'info');
         }
     });
+});
+
+// Clear all saved jobs
+document.getElementById('clearJobs').addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (confirm('Are you sure you want to clear all saved jobs? This action cannot be undone.')) {
+        chrome.runtime.sendMessage({ action: 'clearJobs' }, (response) => {
+            if (response && response.success) {
+                showStatus('All jobs cleared!', 'success');
+            } else {
+                showStatus('Failed to clear jobs', 'error');
+            }
+        });
+    }
 });
 
 function showStatus(message, type) {
