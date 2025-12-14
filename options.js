@@ -7,7 +7,7 @@ const API_ENDPOINTS = {
 
 // Default models for each provider
 const DEFAULT_MODELS = {
-    openai: 'gpt-4',
+    openai: 'gpt-4o-mini',
     anthropic: 'claude-3-sonnet-20240229',
     gemini: 'gemini-2.0-flash'
 };
@@ -42,17 +42,23 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeOverallControls();
 
     // Load all settings
-    chrome.storage.sync.get(['llmSettings', 'downloadOption', 'scoringSettings'], (data) => {
-        const settings = data.llmSettings || {};
+    chrome.storage.sync.get(['llmScraperSettings', 'downloadOption', 'scoringSettings', 'llmScoringSettings'], (data) => {
+        const scraperSettings = data.llmScraperSettings || {};
+        const scoringAPISettings = data.llmScoringSettings || {};
         
-        document.getElementById('useLLM').checked = settings.enabled || false;
-        document.getElementById('apiProvider').value = settings.provider || 'openai';
-        document.getElementById('apiKey').value = settings.apiKey || '';
-        document.getElementById('model').value = settings.model || '';
+        document.getElementById('useLLM').checked = scraperSettings.enabled || false;
+        document.getElementById('apiProvider').value = scraperSettings.provider || 'openai';
+        document.getElementById('apiKey').value = scraperSettings.apiKey || '';
+        document.getElementById('model').value = scraperSettings.model || '';
+        
+        document.getElementById('useLLMScoring').checked = (data.scoringSettings && data.scoringSettings.enabled) || false;
+        document.getElementById('apiProviderScoring').value = scoringAPISettings.provider || 'openai';
+        document.getElementById('apiKeyScoring').value = scoringAPISettings.apiKey || '';
+        document.getElementById('modelScoring').value = scoringAPISettings.model || '';
         
         // Load download option
         const downloadSelect = document.getElementById('downloadOption');
-        downloadSelect.value = data.downloadOption;
+        downloadSelect.value = data.downloadOption || 'manual';
 
         // Load scoring settings
         const scoringSettings = data.scoringSettings || {};
@@ -60,6 +66,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateLLMSettingsVisibility();
         updateLLMScoringVisibility();
+
+        // Load desirability and eligibility details after UI is initialized
+        loadEligibilityDetails(scoringSettings.eligibilityCriteria || []);
+        loadDesirabilityDetails(scoringSettings.desirabilityCriteria || []);
+        
+        // Load weights and threshold
+        const desirabilityWeight = scoringSettings.desirabilityWeight !== undefined ? scoringSettings.desirabilityWeight : 70;
+        const eligibilityWeight = scoringSettings.eligibilityWeight !== undefined ? scoringSettings.eligibilityWeight : 30;
+        const threshold = scoringSettings.threshold !== undefined ? scoringSettings.threshold : 70;
+        
+        document.getElementById('desirability-weight-label').textContent = desirabilityWeight;
+        document.getElementById('eligibility-weight-label').textContent = eligibilityWeight;
+        document.getElementById('threshold-label').textContent = threshold;
+        document.getElementById('weight-thumb').style.left = `${desirabilityWeight}%`;
+        document.getElementById('threshold-thumb').style.left = `${threshold}%`;
     });
 
     // Add event listeners for reset buttons
@@ -86,9 +107,37 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('reset-eligibility').addEventListener('click', () => {
         const eligibilityRows = document.querySelectorAll('#eligibility-grid .scoring-row');
         eligibilityRows.forEach((row, index) => {
-            const weightInput = row.querySelector('input[type="number"]');
-            weightInput.value = DEFAULT_ELIGIBILITY_CATEGORIES[index].default_weight;
+            const detailsInput = row.querySelector('.details-input');
+            const weightInput = row.querySelector('.weight-input-container input');
+            if (detailsInput) detailsInput.value = '';
+            if (weightInput) weightInput.value = DEFAULT_ELIGIBILITY_CATEGORIES[index].default_weight;
         });
+    });
+
+    // Resume upload handler
+    document.getElementById('resume-upload').addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        try {
+            let text = '';
+            if (file.type === 'text/plain') {
+                text = await readFileAsText(file);
+            } else if (file.type === 'application/pdf') {
+                // Placeholder for PDF parsing
+                alert('PDF parsing is not implemented yet. Please upload a TXT file.');
+                return;
+            } else {
+                alert('Please upload a TXT or PDF file.');
+                return;
+            }
+
+            // Parse the resume text and fill details
+            parseResumeAndFillDetails(text);
+        } catch (error) {
+            console.error('Error reading file:', error);
+            alert('Error reading file: ' + error.message);
+        }
     });
 });
 
@@ -111,16 +160,21 @@ function updateLLMSettingsVisibility() {
 function updateLLMScoringVisibility() {
     const useLLMScoring = document.getElementById('useLLMScoring').checked;
     const llmScoringSettings = document.getElementById('llmScoringSettings');
+    const llmScoringAPISettings = document.getElementById('llmScoringAPISettings');
     llmScoringSettings.style.display = useLLMScoring ? 'block' : 'none';
+    llmScoringAPISettings.style.display = useLLMScoring ? 'block' : 'none';
 }
 
 // Update default model when provider changes
 document.getElementById('apiProvider').addEventListener('change', (e) => {
-    updateDefaultModel(e.target.value);
+    updateDefaultModel(e.target.value, 'model');
+});
+document.getElementById('apiProviderScoring').addEventListener('change', (e) => {
+    updateDefaultModel(e.target.value, 'modelScoring');
 });
 
-function updateDefaultModel(provider) {
-    const modelInput = document.getElementById('model');
+function updateDefaultModel(provider, modelId = 'model') {
+    const modelInput = document.getElementById(modelId);
     const currentValue = modelInput.value;
     const isDefaultModel = currentValue === DEFAULT_MODELS.openai || 
                           currentValue === DEFAULT_MODELS.anthropic || 
@@ -136,43 +190,83 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
     const saveBtn = document.getElementById('saveBtn');
     const originalText = saveBtn.textContent;
     
-    const provider = document.getElementById('apiProvider').value;
-    const settings = {
+    const scraperProvider = document.getElementById('apiProvider').value;
+    const scraperSettings = {
         enabled: document.getElementById('useLLM').checked,
-        provider: provider,
-        endpoint: API_ENDPOINTS[provider], // Automatically set based on provider
+        provider: scraperProvider,
+        endpoint: API_ENDPOINTS[scraperProvider], // Automatically set based on provider
         apiKey: document.getElementById('apiKey').value.trim(),
         model: document.getElementById('model').value.trim()
+    };
+
+    const scoringProvider = document.getElementById('apiProviderScoring').value;
+    const scoringAPISettings = {
+        enabled: document.getElementById('useLLMScoring').checked,
+        provider: scoringProvider,
+        endpoint: API_ENDPOINTS[scoringProvider], // Automatically set based on provider
+        apiKey: document.getElementById('apiKeyScoring').value.trim(),
+        model: document.getElementById('modelScoring').value.trim()
     };
 
     // Get download option
     const downloadOption = document.getElementById('downloadOption').value;
     
-    // Validate if LLM is enabled
-    if (settings.enabled) {
-        if (!settings.apiKey) {
-            showStatus('Please enter an API key', 'error');
+    // Validate scraper LLM if enabled
+    if (scraperSettings.enabled) {
+        if (!scraperSettings.apiKey) {
+            showStatus('Please enter an API key for scraper', 'error');
             return;
         }
-        if (!settings.model) {
-            showStatus('Please enter a model name', 'error');
+        if (!scraperSettings.model) {
+            showStatus('Please enter a model name for scraper', 'error');
             return;
         }
         
         // Validate API key
         saveBtn.disabled = true;
-        saveBtn.textContent = 'Validating API key...';
+        saveBtn.textContent = 'Validating scraper API key...';
         
         try {
-            const isValid = await validateAPIKey(settings);
+            const isValid = await validateAPIKey(scraperSettings);
             if (!isValid) {
-                showStatus('API key validation failed. Please check your API key and try again.', 'error');
+                showStatus('Scraper API key validation failed. Please check your API key and try again.', 'error');
                 saveBtn.disabled = false;
                 saveBtn.textContent = originalText;
                 return;
             }
         } catch (error) {
-            showStatus('Error validating API key: ' + error.message, 'error');
+            showStatus('Error validating scraper API key: ' + error.message, 'error');
+            saveBtn.disabled = false;
+            saveBtn.textContent = originalText;
+            return;
+        }
+    }
+
+    // Validate scoring LLM if enabled
+    if (scoringAPISettings.enabled) {
+        if (!scoringAPISettings.apiKey) {
+            showStatus('Please enter an API key for scoring', 'error');
+            return;
+        }
+        if (!scoringAPISettings.model) {
+            showStatus('Please enter a model name for scoring', 'error');
+            return;
+        }
+        
+        // Validate API key
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Validating scoring API key...';
+        
+        try {
+            const isValid = await validateAPIKey(scoringAPISettings);
+            if (!isValid) {
+                showStatus('Scoring API key validation failed. Please check your API key and try again.', 'error');
+                saveBtn.disabled = false;
+                saveBtn.textContent = originalText;
+                return;
+            }
+        } catch (error) {
+            showStatus('Error validating scoring API key: ' + error.message, 'error');
             saveBtn.disabled = false;
             saveBtn.textContent = originalText;
             return;
@@ -205,9 +299,31 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
         }
     });
 
+    // Collect eligibility criteria
+    const eligibilityRows = document.querySelectorAll('#eligibility-grid .scoring-row');
+    const eligibilityCriteria = [];
+    
+    eligibilityRows.forEach(row => {
+        const name = row.querySelector('.category-label').textContent;
+        const detailsInput = row.querySelector('.details-input');
+        const weightInput = row.querySelector('.weight-input-container input');
+        
+        if (name && detailsInput && weightInput) {
+            eligibilityCriteria.push({
+                name: name,
+                details: detailsInput.value.trim(),
+                weight: parseInt(weightInput.value, 10) || 0
+            });
+        }
+    });
+
     const scoringSettings = {
         enabled: document.getElementById('useLLMScoring').checked,
-        desirabilityCriteria: desirabilityCriteria
+        desirabilityCriteria: desirabilityCriteria,
+        eligibilityCriteria: eligibilityCriteria,
+        desirabilityWeight: parseInt(document.getElementById('desirability-weight-label').textContent, 10),
+        eligibilityWeight: parseInt(document.getElementById('eligibility-weight-label').textContent, 10),
+        threshold: parseInt(document.getElementById('threshold-label').textContent, 10)
     };
 
     // Validate Scoring Settings before saving
@@ -222,9 +338,10 @@ document.getElementById('saveBtn').addEventListener('click', async () => {
 
     // Save all settings
     chrome.storage.sync.set({ 
-        llmSettings: settings,
+        llmScraperSettings: scraperSettings,
         downloadOption: downloadOption,
-        scoringSettings: scoringSettings
+        scoringSettings: scoringSettings,
+        llmScoringSettings: scoringAPISettings
     }, () => {
         showStatus('Settings saved successfully!', 'success');
         saveBtn.disabled = false;
@@ -259,18 +376,23 @@ function validateScoringSettings() {
     // Validate Eligibility
     if (eligibilityWeight > 0) {
         let totalWeight = 0;
-        const eligibilityInputs = document.querySelectorAll('#eligibility-grid .weight-input-container input');
-        eligibilityInputs.forEach(input => {
-            totalWeight += parseInt(input.value, 10) || 0;
+        let hasDetails = false;
+        const eligibilityRows = document.querySelectorAll('#eligibility-grid .scoring-row');
+        eligibilityRows.forEach(row => {
+            const weightInput = row.querySelector('.weight-input-container input');
+            const detailsInput = row.querySelector('.details-input');
+            totalWeight += parseInt(weightInput.value, 10) || 0;
+            if (detailsInput && detailsInput.value.trim() !== '') {
+                hasDetails = true;
+            }
         });
 
         if (totalWeight !== 100) {
             return { isValid: false, message: `Eligibility criteria weights must total 100%, but currently total ${totalWeight}%.` };
         }
 
-        const hasResume = true; // Hardcoded as requested
-        if (!hasResume) {
-            return { isValid: false, message: 'Eligibility weight is > 0%, but no resume has been uploaded. Please upload files or set the weight to 0%.' };
+        if (!hasDetails) {
+            return { isValid: false, message: 'Eligibility weight is > 0%, but no details have been provided. Please fill in your details or set the weight to 0%.' };
         }
     }
 
@@ -337,17 +459,7 @@ function initializeOverallControls() {
         }
     });
 
-    let defaultWeight = 70;
-
-    // Set default for weight slider
-    desirabilityLabel.textContent = defaultWeight;
-    eligibilityLabel.textContent = 100 - defaultWeight;
-    weightThumb.style.left = `${defaultWeight}%`;
-
-    // Set default for threshold slider
-    const defaultThreshold = 70;
-    thresholdLabel.textContent = defaultThreshold;
-    thresholdThumb.style.left = `${defaultThreshold}%`;
+    // Note: Default values are set in the loading code to ensure saved values take precedence
 }
 
 
@@ -361,6 +473,84 @@ function initializeEligibilityUI() {
 
 }
 
+function loadEligibilityDetails(eligibilityCriteria) {
+    const eligibilityRows = document.querySelectorAll('#eligibility-grid .scoring-row');
+    eligibilityRows.forEach((row, index) => {
+        if (eligibilityCriteria[index]) {
+            const detailsInput = row.querySelector('.details-input');
+            const weightInput = row.querySelector('.weight-input-container input');
+            if (detailsInput) detailsInput.value = eligibilityCriteria[index].details || '';
+            if (weightInput) weightInput.value = eligibilityCriteria[index].weight || DEFAULT_ELIGIBILITY_CATEGORIES[index].default_weight;
+        }
+    });
+}
+
+function loadDesirabilityDetails(desirabilityCriteria) {
+    const desirabilityRows = document.querySelectorAll('#desirability-grid .scoring-row');
+    
+    desirabilityCriteria.forEach(criterion => {
+        // Find existing row by name
+        let targetRow = null;
+        desirabilityRows.forEach(row => {
+            const labelDiv = row.querySelector('.category-label');
+            const nameInput = row.querySelector('.category-name-input');
+            
+            let rowName = '';
+            if (labelDiv) {
+                rowName = labelDiv.textContent;
+            } else if (nameInput) {
+                rowName = nameInput.value;
+            }
+            
+            if (rowName === criterion.name) {
+                targetRow = row;
+            }
+        });
+        
+        // If not found, find an empty custom row
+        if (!targetRow) {
+            desirabilityRows.forEach(row => {
+                const nameInput = row.querySelector('.category-name-input');
+                if (nameInput && nameInput.value.trim() === '') {
+                    if (!targetRow) {
+                        targetRow = row;
+                        nameInput.value = criterion.name;
+                        // Trigger input event to enable preference input
+                        nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                }
+            });
+        }
+        
+        // If still not found, create a new custom row
+        if (!targetRow) {
+            const container = document.getElementById('desirability-grid');
+            const newRow = createDesirabilityRow(criterion.name, 'Enter keywords for your category', criterion.priority, true);
+            container.appendChild(newRow);
+            targetRow = newRow;
+        }
+        
+        // Set the preference and priority
+        if (targetRow) {
+            const preferenceInput = targetRow.querySelector('input[type="text"]:not(.category-name-input)');
+            const prioritySelector = targetRow.querySelector('.priority-selector');
+            
+            if (preferenceInput) {
+                preferenceInput.value = criterion.preference;
+                // Trigger input event to update priority selector state
+                preferenceInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            
+            if (prioritySelector) {
+                prioritySelector.dataset.value = criterion.priority;
+                prioritySelector.querySelectorAll('.priority-option').forEach(opt => {
+                    opt.classList.toggle('selected', opt.dataset.value === criterion.priority);
+                });
+            }
+        }
+    });
+}
+
 function createEligibilityRow(name, placeholder, defaultWeight) {
     const fragment = document.createDocumentFragment();
     const row = document.createElement('div');
@@ -370,6 +560,20 @@ function createEligibilityRow(name, placeholder, defaultWeight) {
     const nameLabel = document.createElement('div');
     nameLabel.textContent = name;
     nameLabel.className = 'category-label';
+
+    // Container for Details and Weight
+    const detailsWeightContainer = document.createElement('div');
+    detailsWeightContainer.style.display = 'flex';
+    detailsWeightContainer.style.justifyContent = 'space-between';
+    detailsWeightContainer.style.alignItems = 'center';
+    detailsWeightContainer.style.gap = '10px';
+
+    // Details Input
+    const detailsInput = document.createElement('input');
+    detailsInput.type = 'text';
+    detailsInput.placeholder = placeholder;
+    detailsInput.className = 'details-input';
+    detailsInput.style.flexGrow = '1';
 
     // Weight Input
     const weightContainer = document.createElement('div');
@@ -401,8 +605,11 @@ function createEligibilityRow(name, placeholder, defaultWeight) {
     weightContainer.appendChild(weightInput);
     weightContainer.appendChild(percentSign);
 
+    detailsWeightContainer.appendChild(detailsInput);
+    detailsWeightContainer.appendChild(weightContainer);
+
     row.appendChild(nameLabel);
-    row.appendChild(weightContainer);
+    row.appendChild(detailsWeightContainer);
     
     fragment.appendChild(row);
     return fragment;
@@ -592,4 +799,81 @@ function showStatus(message, type) {
     setTimeout(() => {
         status.style.display = 'none';
     }, 3000);
+}
+
+// Helper function to read file as text
+function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(new Error('File reading error'));
+        reader.readAsText(file);
+    });
+}
+
+// Placeholder function to parse resume and fill details
+function parseResumeAndFillDetails(text) {
+    // Simple parsing logic - this is a placeholder
+    const lowerText = text.toLowerCase();
+    
+    // Experience Level
+    let experience = '';
+    if (lowerText.includes('senior') || lowerText.includes('lead') || lowerText.includes('manager')) {
+        experience = 'Senior (5+ years)';
+    } else if (lowerText.includes('mid') || lowerText.includes('intermediate')) {
+        experience = 'Mid-level (3-5 years)';
+    } else if (lowerText.includes('junior') || lowerText.includes('entry') || lowerText.includes('fresh')) {
+        experience = 'Entry-level (0-2 years)';
+    } else {
+        experience = 'Mid-level (3-5 years)'; // default
+    }
+    
+    // Education Level
+    let education = '';
+    if (lowerText.includes('phd') || lowerText.includes('doctorate')) {
+        education = 'PhD';
+    } else if (lowerText.includes('master') || lowerText.includes('ms') || lowerText.includes('ma')) {
+        education = "Master's";
+    } else if (lowerText.includes('bachelor') || lowerText.includes('bs') || lowerText.includes('ba')) {
+        education = "Bachelor's";
+    } else {
+        education = "Bachelor's"; // default
+    }
+    
+    // Required Skills - extract common skills
+    const skills = [];
+    const skillKeywords = ['python', 'javascript', 'java', 'sql', 'machine learning', 'data analysis', 'react', 'node.js', 'aws', 'docker'];
+    skillKeywords.forEach(skill => {
+        if (lowerText.includes(skill)) {
+            skills.push(skill.charAt(0).toUpperCase() + skill.slice(1));
+        }
+    });
+    const requiredSkills = skills.slice(0, 3).join(', '); // take first 3
+    
+    // Preferred Skills - similar
+    const preferredSkills = skills.slice(3).join(', ');
+    
+    // Fill the inputs
+    const eligibilityRows = document.querySelectorAll('#eligibility-grid .scoring-row');
+    eligibilityRows.forEach((row, index) => {
+        const detailsInput = row.querySelector('.details-input');
+        if (detailsInput) {
+            switch (index) {
+                case 0: // Experience Level
+                    detailsInput.value = experience;
+                    break;
+                case 1: // Education Level
+                    detailsInput.value = education;
+                    break;
+                case 2: // Required Skills
+                    detailsInput.value = requiredSkills;
+                    break;
+                case 3: // Preferred Skills
+                    detailsInput.value = preferredSkills;
+                    break;
+            }
+        }
+    });
+    
+    showStatus('Resume parsed and details filled!', 'success');
 }

@@ -272,8 +272,9 @@
         }
         .eligibility-grid {
             display: grid;
-            grid-template-columns: 130px 300px;
+            grid-template-columns: 130px 1fr;
             gap: 10px;
+            align-items: center;
         }
 
         /* Overall Suggestion Styles */
@@ -380,10 +381,10 @@
         <div class="form-group">
             <label for="downloadOption">Download Trigger</label>
             <select id="downloadOption">
-                <option value="any_scrape">After any scraping action (Default)</option>
+                <option value="manual">Only when clicking "View Saved Jobs" (Default)</option>
+                <option value="any_scrape">After any scraping action</option>
                 <option value="any_score">After any scoring action</option>
                 <option value="scrape_and_score">After scrape & score</option>
-                <option value="manual">Only when clicking "View Saved Jobs"</option>
             </select>
         </div>
         <div class="help-text">Configures the trigger for local file downloads.
@@ -402,7 +403,7 @@
             default DOM-based scraping method.</div>
 
         <div id="llmSettings" style="display: none;">
-            <h3 style="margin-top: 20px; margin-bottom: 20px;">LLM API Configuration</h3>
+            <h3 style="margin-top: 20px; margin-bottom: 20px;">LLM API Configuration (Scraper)</h3>
             <div class="form-group">
                 <label for="apiProvider">API Provider</label>
                 <select id="apiProvider">
@@ -419,9 +420,9 @@
             <div class="help-text">Your API key is stored locally and never shared.</div>
             <div class="form-group">
                 <label for="model">Model</label>
-                <input type="text" id="model" placeholder="e.g., gpt-4, claude-3-sonnet, gemini-pro">
+                <input type="text" id="model" placeholder="e.g., gpt-4o-mini, claude-3-sonnet, gemini-pro">
             </div>
-            <div class="help-text">Model name (e.g., gpt-4, gpt-3.5-turbo, claude-3-opus-20240229, gemini-2.0-flash)</div>
+            <div class="help-text">Model name (e.g., gpt-4o-mini, claude-3-opus-20240229, gemini-2.0-flash)</div>
         </div>
 
 
@@ -435,6 +436,29 @@
         </div>
         <div class="help-text">When enabled, the LLM will score jobs based on 
             your preferences.
+        </div>
+
+        <div id="llmScoringAPISettings" style="display: none;">
+            <h3 style="margin-top: 20px; margin-bottom: 20px;">LLM API Configuration (Scoring)</h3>
+            <div class="form-group">
+                <label for="apiProviderScoring">API Provider</label>
+                <select id="apiProviderScoring">
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="gemini">Google Gemini</option>
+                </select>
+            </div>
+            <div class="help-text">Select your LLM API provider for scoring. The endpoint will be automatically configured.</div>
+            <div class="form-group">
+                <label for="apiKeyScoring">API Key</label>
+                <input type="password" id="apiKeyScoring" placeholder="sk-..., sk-ant-..., or AIza...">
+            </div>
+            <div class="help-text">Your API key is stored locally and never shared.</div>
+            <div class="form-group">
+                <label for="modelScoring">Model</label>
+                <input type="text" id="modelScoring" placeholder="e.g., gpt-4o-mini, claude-3-sonnet, gemini-pro">
+            </div>
+            <div class="help-text">Model name (e.g., gpt-4o-mini, claude-3-opus-20240229, gemini-2.0-flash)</div>
         </div>
 
         <div id="llmScoringSettings">
@@ -467,12 +491,13 @@
                 <h3>Eligibility Criteria</h3>
                 <button id="reset-eligibility" class="btn-reset">Reset</button>
             </div>
-            <p class="help-text full-width-help" style="margin-bottom: 15px; margin-top: -15px;">Upload your resume/CV to automatically check for eligibility against job requirements.<br>Set the weight for each category to determine the eligibility score. The total should ideally be 100%.</p>
-            <button id="upload-resume-btn" class="btn-secondary">Upload Files</button>
+            <p class="help-text full-width-help" style="margin-bottom: 15px; margin-top: -15px;">Provide your details for each category to enable eligibility scoring. The LLM will compare job requirements against your profile.<br>Set the weight for each category to determine the eligibility score. The total should ideally be 100%.</p>
+            <input type="file" id="resume-upload" accept=".txt,.pdf" style="margin-bottom: 20px;">
+            <div class="help-text" style="margin-top: -15px; margin-bottom: 20px;">Upload your resume (TXT or PDF) to auto-fill details. <em>(Placeholder - basic parsing implemented)</em></div>
             <div class="eligibility-grid" id="eligibility-grid" style="margin-top: 20px;">
                 <!-- Headers -->
                 <div class="scoring-header">Category</div>
-                <div class="scoring-header">Weight (% of Total Eligibility Score)</div>
+                <div class="scoring-header">Your Details & Weight</div>
 
                 <!-- Eligibility Categories will be added here by JS -->
             </div>
