@@ -130,6 +130,12 @@
             border: 1px solid #f5c6cb;
         }
 
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
         .divider {
             height: 1px;
             background: #eee;
@@ -380,6 +386,185 @@
             cursor: pointer;
             color: #555;
         }
+
+        /* Saved Jobs Table Styles */
+        .jobs-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .jobs-toolbar-actions {
+            display: flex;
+            gap: 10px;
+        }
+        #jobs-count {
+            font-weight: 500;
+            color: #555;
+        }
+        .btn-danger {
+            padding: 8px 12px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        #jobs-container {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+        }
+        #jobs-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        #jobs-table th {
+            background: #f8f9fa;
+            padding: 10px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        #jobs-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #eee;
+            vertical-align: top;
+        }
+        #jobs-table tr:hover {
+            background: #f9f9f9;
+        }
+        #jobs-table .job-title {
+            color: var(--secondary-color);
+            cursor: pointer;
+            font-weight: 500;
+        }
+        #jobs-table .job-title:hover {
+            text-decoration: underline;
+        }
+        #jobs-table .job-description {
+            max-width: 250px;
+            max-height: 60px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #666;
+            font-size: 12px;
+        }
+        #jobs-table .job-date {
+            font-size: 11px;
+            color: #888;
+            white-space: nowrap;
+        }
+        .btn-icon {
+            padding: 4px 8px;
+            background: transparent;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-icon:hover {
+            background: #f0f0f0;
+        }
+        .btn-icon.delete:hover {
+            background: #ffe6e6;
+            border-color: #dc3545;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 0;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 85vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            background: #f8f9fa;
+        }
+        .modal-header h3 {
+            margin: 0;
+            font-size: 18px;
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+        .modal-close {
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+        .modal-close:hover {
+            color: #333;
+        }
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+        .modal-field {
+            margin-bottom: 15px;
+        }
+        .modal-field label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        .modal-field span, .modal-field a {
+            color: #333;
+        }
+        .modal-field a {
+            color: var(--secondary-color);
+            word-break: break-all;
+        }
+        .description-field #modal-job-description {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 6px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 15px 20px;
+            border-top: 1px solid #eee;
+            background: #f8f9fa;
+        }
         
     </style>
 </head>
@@ -395,7 +580,7 @@
         <div class="form-group">
             <label for="downloadOption">Download Trigger</label>
             <select id="downloadOption">
-                <option value="manual">Only when clicking "View Saved Jobs" (Default)</option>
+                <option value="manual">Only when clicking "Download Saved Jobs" button (Default)</option>
                 <option value="any_scrape">After any scraping action</option>
                 <option value="any_score">After any scoring action</option>
                 <option value="scrape_and_score">After scrape & score</option>
@@ -562,6 +747,77 @@
 
         <button id="saveBtn">Save Settings</button>
         <div id="status" class="status"></div>
+
+        <div class="divider"></div>
+        <h2>Saved Job Listings</h2>
+        <div class="jobs-toolbar">
+            <span id="jobs-count">0 jobs saved</span>
+            <div class="jobs-toolbar-actions">
+                <button id="refresh-jobs" class="btn-secondary">Refresh</button>
+                <button id="download-jobs" class="btn-secondary">Download CSV</button>
+                <button id="clear-all-jobs" class="btn-danger">Clear All</button>
+            </div>
+        </div>
+        <div id="jobs-container">
+            <table id="jobs-table">
+                <thead>
+                    <tr>
+                        <th style="width: 25%;">Title</th>
+                        <th style="width: 15%;">Company</th>
+                        <th style="width: 15%;">Location</th>
+                        <th style="width: 30%;">Description</th>
+                        <th style="width: 10%;">Scraped</th>
+                        <th style="width: 5%;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="jobs-tbody">
+                    <!-- Jobs will be populated here -->
+                </tbody>
+            </table>
+            <div id="no-jobs-message" style="display: none; text-align: center; padding: 40px; color: #666;">
+                No saved jobs yet. Use the extension to scrape job listings.
+            </div>
+        </div>
+
+        <!-- Job Details Modal -->
+        <div id="job-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="modal-title">Job Details</h3>
+                    <span class="modal-close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div class="modal-field">
+                        <label>Title:</label>
+                        <span id="modal-job-title"></span>
+                    </div>
+                    <div class="modal-field">
+                        <label>Company:</label>
+                        <span id="modal-job-company"></span>
+                    </div>
+                    <div class="modal-field">
+                        <label>Location:</label>
+                        <span id="modal-job-location"></span>
+                    </div>
+                    <div class="modal-field">
+                        <label>URL:</label>
+                        <a id="modal-job-url" href="#" target="_blank"></a>
+                    </div>
+                    <div class="modal-field">
+                        <label>Scraped At:</label>
+                        <span id="modal-job-scraped"></span>
+                    </div>
+                    <div class="modal-field description-field">
+                        <label>Description:</label>
+                        <div id="modal-job-description"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="modal-delete-btn" class="btn-danger">Delete Job</button>
+                    <button id="modal-close-btn" class="btn-secondary">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="options.js"></script>

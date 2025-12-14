@@ -877,3 +877,247 @@ function parseResumeAndFillDetails(text) {
     
     showStatus('Resume parsed and details filled!', 'success');
 }
+
+// ============================================
+// SAVED JOBS MANAGEMENT
+// ============================================
+
+let savedJobs = [];
+let currentJobIndex = -1;
+
+// Initialize saved jobs UI
+function initializeSavedJobsUI() {
+    loadSavedJobs();
+    
+    // Event listeners
+    document.getElementById('refresh-jobs').addEventListener('click', loadSavedJobs);
+    document.getElementById('download-jobs').addEventListener('click', downloadJobsCSV);
+    document.getElementById('clear-all-jobs').addEventListener('click', clearAllJobs);
+    
+    // Modal events
+    document.querySelector('.modal-close').addEventListener('click', closeModal);
+    document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+    document.getElementById('modal-delete-btn').addEventListener('click', deleteCurrentJob);
+    
+    // Close modal on outside click
+    document.getElementById('job-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'job-modal') {
+            closeModal();
+        }
+    });
+    
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+}
+
+// Load saved jobs from storage
+function loadSavedJobs() {
+    chrome.storage.local.get({ jobs: [] }, (data) => {
+        savedJobs = data.jobs || [];
+        renderJobsTable();
+    });
+}
+
+// Render jobs table
+function renderJobsTable() {
+    const tbody = document.getElementById('jobs-tbody');
+    const noJobsMessage = document.getElementById('no-jobs-message');
+    const jobsCount = document.getElementById('jobs-count');
+    
+    // Update count
+    jobsCount.textContent = `${savedJobs.length} job${savedJobs.length !== 1 ? 's' : ''} saved`;
+    
+    // Clear existing rows
+    tbody.innerHTML = '';
+    
+    if (savedJobs.length === 0) {
+        noJobsMessage.style.display = 'block';
+        document.getElementById('jobs-table').style.display = 'none';
+        return;
+    }
+    
+    noJobsMessage.style.display = 'none';
+    document.getElementById('jobs-table').style.display = 'table';
+    
+    savedJobs.forEach((item, index) => {
+        const job = item.job || item;
+        const row = document.createElement('tr');
+        
+        // Format date
+        const scrapedDate = job.scrapedAt ? formatDate(job.scrapedAt) : 'N/A';
+        
+        // Truncate description
+        const shortDesc = truncateText(job.description || '', 100);
+        
+        row.innerHTML = `
+            <td>
+                <span class="job-title" data-index="${index}">${escapeHtml(job.title || 'Untitled')}</span>
+            </td>
+            <td>${escapeHtml(job.company || 'N/A')}</td>
+            <td>${escapeHtml(job.locations || 'N/A')}</td>
+            <td><div class="job-description">${escapeHtml(shortDesc)}</div></td>
+            <td class="job-date">${scrapedDate}</td>
+            <td>
+                <button class="btn-icon delete" data-index="${index}" title="Delete job">🗑️</button>
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+    
+    // Add click handlers for job titles
+    tbody.querySelectorAll('.job-title').forEach(el => {
+        el.addEventListener('click', () => {
+            const index = parseInt(el.dataset.index);
+            openJobModal(index);
+        });
+    });
+    
+    // Add click handlers for delete buttons
+    tbody.querySelectorAll('.btn-icon.delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const index = parseInt(btn.dataset.index);
+            deleteJob(index);
+        });
+    });
+}
+
+// Open job details modal
+function openJobModal(index) {
+    const item = savedJobs[index];
+    const job = item.job || item;
+    currentJobIndex = index;
+    
+    document.getElementById('modal-job-title').textContent = job.title || 'Untitled';
+    document.getElementById('modal-job-company').textContent = job.company || 'N/A';
+    document.getElementById('modal-job-location').textContent = job.locations || 'N/A';
+    
+    const urlEl = document.getElementById('modal-job-url');
+    urlEl.href = job.url || '#';
+    urlEl.textContent = job.url || 'N/A';
+    
+    document.getElementById('modal-job-scraped').textContent = job.scrapedAt ? 
+        new Date(job.scrapedAt).toLocaleString() : 'N/A';
+    
+    document.getElementById('modal-job-description').textContent = job.description || 'No description available.';
+    
+    document.getElementById('job-modal').style.display = 'block';
+}
+
+// Close modal
+function closeModal() {
+    document.getElementById('job-modal').style.display = 'none';
+    currentJobIndex = -1;
+}
+
+// Delete current job from modal
+function deleteCurrentJob() {
+    if (currentJobIndex >= 0) {
+        deleteJob(currentJobIndex);
+        closeModal();
+    }
+}
+
+// Delete a job by index
+function deleteJob(index) {
+    if (index < 0 || index >= savedJobs.length) return;
+    
+    const job = savedJobs[index].job || savedJobs[index];
+    const jobTitle = job.title || 'this job';
+    
+    if (!confirm(`Are you sure you want to delete "${jobTitle}"?`)) {
+        return;
+    }
+    
+    savedJobs.splice(index, 1);
+    
+    chrome.storage.local.set({ jobs: savedJobs }, () => {
+        if (chrome.runtime.lastError) {
+            showStatus('Error deleting job: ' + chrome.runtime.lastError.message, 'error');
+        } else {
+            showStatus('Job deleted successfully!', 'success');
+            renderJobsTable();
+            
+            // Update badge
+            chrome.runtime.sendMessage({ action: 'updateBadge', count: savedJobs.length });
+        }
+    });
+}
+
+// Clear all jobs
+function clearAllJobs() {
+    if (savedJobs.length === 0) {
+        showStatus('No jobs to clear.', 'info');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete all ${savedJobs.length} saved jobs? This cannot be undone.`)) {
+        return;
+    }
+    
+    chrome.storage.local.set({ jobs: [] }, () => {
+        if (chrome.runtime.lastError) {
+            showStatus('Error clearing jobs: ' + chrome.runtime.lastError.message, 'error');
+        } else {
+            savedJobs = [];
+            renderJobsTable();
+            showStatus('All jobs cleared successfully!', 'success');
+            
+            // Update badge
+            chrome.runtime.sendMessage({ action: 'updateBadge', count: 0 });
+        }
+    });
+}
+
+// Download jobs as CSV
+function downloadJobsCSV() {
+    if (savedJobs.length === 0) {
+        showStatus('No jobs to download.', 'info');
+        return;
+    }
+    
+    chrome.runtime.sendMessage({ action: 'downloadCSV' }, (response) => {
+        if (response && response.success) {
+            showStatus('CSV download started!', 'success');
+        } else {
+            showStatus('Error downloading CSV: ' + (response?.error || 'Unknown error'), 'error');
+        }
+    });
+}
+
+// Helper: Format date
+function formatDate(dateStr) {
+    try {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric',
+            year: '2-digit'
+        });
+    } catch (e) {
+        return 'N/A';
+    }
+}
+
+// Helper: Truncate text
+function truncateText(text, maxLength) {
+    if (!text) return '';
+    if (text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+}
+
+// Helper: Escape HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Initialize on DOM load
+document.addEventListener('DOMContentLoaded', initializeSavedJobsUI);

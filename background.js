@@ -22,7 +22,7 @@ chrome.contextMenus.onClicked.addListener((info) => {
 // Handle messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'scrape') {
-        handleScrapeRequest(request.tabId, request.method, request.settings, request.score)
+        handleScrapeRequest(request, request.tabId, request.method, request.settings, request.score)
             .then((result) => {
                 sendResponse(result);
             })
@@ -30,6 +30,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: false, error: error.message });
             });
         return true; // Indicates we will send a response asynchronously
+    }
+    
+    if (request.action === 'forceSaveJob') {
+        forceSaveJob(request.job, request.tabId, request.triggerScore, request.settings)
+            .then((result) => {
+                sendResponse(result);
+            })
+            .catch((error) => {
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
     }
     
     if (request.action === 'downloadCSV') {
@@ -73,10 +84,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
         return true;
     }
+    
+    if (request.action === 'updateBadge') {
+        const count = request.count;
+        chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
+        sendResponse({ success: true });
+        return true;
+    }
+    
+    if (request.action === 'getJobs') {
+        chrome.storage.local.get({ jobs: [] }, (data) => {
+            sendResponse({ success: true, jobs: data.jobs });
+        });
+        return true;
+    }
 });
 
 // Function to handle scrape requests from popup
-async function handleScrapeRequest(tabId, method, llmSettings, triggerScore = false) {
+async function handleScrapeRequest(request, tabId, method, llmSettings, triggerScore = false) {
     if (!tabId) {
         throw new Error('No tab ID provided');
     }
@@ -109,9 +134,24 @@ async function handleScrapeRequest(tabId, method, llmSettings, triggerScore = fa
         // Add scraped timestamp
         job.job.scrapedAt = new Date().toISOString();
 
-        // Save the job and handle post-save actions
+        // Check for duplicate jobs
         const data = await chrome.storage.local.get({ jobs: [] });
         let jobs = data.jobs;
+        
+        const duplicate = findDuplicateJob(jobs, job.job);
+        if (duplicate && !request?.forceSave) {
+            return { 
+                success: false, 
+                isDuplicate: true, 
+                duplicateInfo: {
+                    title: duplicate.job?.title || duplicate.title,
+                    company: duplicate.job?.company || duplicate.company,
+                    scrapedAt: duplicate.job?.scrapedAt || duplicate.scrapedAt
+                },
+                scrapedJob: job // Return the scraped job for potential force save
+            };
+        }
+        
         jobs.push(job);
         
         await chrome.storage.local.set({ jobs });
@@ -154,8 +194,86 @@ async function handleScrapeRequest(tabId, method, llmSettings, triggerScore = fa
     }
 }
 
+// Find duplicate job by URL or title+company combination
+function findDuplicateJob(jobs, newJob) {
+    if (!jobs || !newJob) return null;
+    
+    const newUrl = newJob.url?.toLowerCase().trim();
+    const newTitle = newJob.title?.toLowerCase().trim();
+    const newCompany = newJob.company?.toLowerCase().trim();
+    
+    for (const item of jobs) {
+        const existingJob = item.job || item;
+        const existingUrl = existingJob.url?.toLowerCase().trim();
+        const existingTitle = existingJob.title?.toLowerCase().trim();
+        const existingCompany = existingJob.company?.toLowerCase().trim();
+        
+        // Check by URL (most reliable)
+        if (newUrl && existingUrl && newUrl === existingUrl) {
+            return item;
+        }
+        
+        // Check by title + company combination
+        if (newTitle && existingTitle && newCompany && existingCompany) {
+            if (newTitle === existingTitle && newCompany === existingCompany) {
+                return item;
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Force save a job (used when user confirms saving a duplicate)
+async function forceSaveJob(job, tabId, triggerScore = false, llmSettings = null) {
+    try {
+        const data = await chrome.storage.local.get({ jobs: [] });
+        let jobs = data.jobs;
+        jobs.push(job);
+        
+        await chrome.storage.local.set({ jobs });
+
+        // Score the job if requested
+        if (triggerScore && llmSettings) {
+            try {
+                await scoreDesirabilityWithLLM('latest', llmSettings);
+                await scoreEligibilityWithLLM('latest', llmSettings);
+                const updatedData = await chrome.storage.local.get({ jobs: [] });
+                jobs = updatedData.jobs;
+            } catch (err) {
+                console.error("Error during scoring:", err);
+            }
+        }
+
+        console.log("Job force saved. Total jobs:", jobs.length);
+
+        // Update badge
+        if (tabId) {
+            await chrome.action.setBadgeText({
+                tabId: tabId,
+                text: String(jobs.length),
+            });
+        }
+
+        // Check download option
+        const settings = await chrome.storage.sync.get({ downloadOption: 'any_scrape' });
+        const opt = settings.downloadOption;
+        
+        if (opt === 'any_scrape' || 
+           (opt === 'scrape_and_score' && triggerScore) || 
+           (opt === 'any_score' && triggerScore)) {
+            await downloadJobsAsCSV(jobs);
+        }
+
+        return { success: true, jobCount: jobs.length };
+    } catch (error) {
+        console.error("Error force saving job:", error);
+        throw error;
+    }
+}
+
 function getPageContent() {
-    const maxLength = 12000; // Increased slightly for better context
+    const maxLength = 50000; // Increased to capture full job descriptions
 
     // --- STRATEGY 1: Check for JSON-LD Structured Data (The "Gold Standard") ---
     // This is hidden data specifically formatted for bots/search engines.
@@ -677,8 +795,8 @@ async function callOpenAIAPI(settings, prompt) {
                     content: prompt
                 }
             ],
-            temperature: 0.3,
-            max_tokens: 2000
+            temperature: 0.3
+            // No max_tokens limit - let the model use as much as needed
         })
     });
     
@@ -702,7 +820,7 @@ async function callAnthropicAPI(settings, prompt) {
         },
         body: JSON.stringify({
             model: settings.model,
-            max_tokens: 2000,
+            max_tokens: 16384, // High limit for full descriptions
             messages: [
                 {
                     role: 'user',
@@ -743,8 +861,8 @@ async function callGeminiAPI(settings, prompt) {
                 }
             ],
             generationConfig: {
-                temperature: 0.3,
-                maxOutputTokens: 2000
+                temperature: 0.3
+                // No maxOutputTokens limit - let the model use as much as needed
             }
         })
     });

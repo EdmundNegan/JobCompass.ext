@@ -77,6 +77,12 @@ document.getElementById('scrapeDefault').addEventListener('click', async () => {
                 return;
             }
             
+            // Check for duplicate
+            if (response && response.isDuplicate) {
+                handleDuplicateJob(response, tab.id, false, null);
+                return;
+            }
+            
             if (response && response.success) {
                 // Check download option to show the correct message
                 chrome.storage.sync.get({ downloadOption: 'any_scrape' }, (options) => {
@@ -133,6 +139,12 @@ document.getElementById('scrapeLLM').addEventListener('click', async () => {
             
             if (chrome.runtime.lastError) {
                 showStatus('Error: ' + chrome.runtime.lastError.message, 'error');
+                return;
+            }
+            
+            // Check for duplicate
+            if (response && response.isDuplicate) {
+                handleDuplicateJob(response, tab.id, false, llmSettings);
                 return;
             }
             
@@ -199,6 +211,12 @@ if (scrapeAndScoreBtn) {
                     return;
                 }
                 
+                // Check for duplicate
+                if (response && response.isDuplicate) {
+                    handleDuplicateJob(response, tab.id, true, llmSettings);
+                    return;
+                }
+                
                 if (response && response.success) {
                     // Check download option to show the correct message
                     chrome.storage.sync.get({ downloadOption: 'any_scrape' }, (options) => {
@@ -256,9 +274,14 @@ document.getElementById('openOptions').addEventListener('click', () => {
     window.close();
 });
 
-// View saved jobs (download CSV)
-document.getElementById('viewJobs').addEventListener('click', async (e) => {
-    e.preventDefault();
+// View/Edit saved jobs (opens options page to saved jobs section)
+document.getElementById('viewEditJobs').addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+    window.close();
+});
+
+// Download saved jobs (download CSV)
+document.getElementById('downloadJobs').addEventListener('click', async () => {
     chrome.runtime.sendMessage({ action: 'downloadCSV' }, (response) => {
         if (response && response.success) {
             showStatus('CSV downloaded!', 'success');
@@ -281,6 +304,48 @@ document.getElementById('clearJobs').addEventListener('click', async (e) => {
         });
     }
 });
+
+// Handle duplicate job detection
+function handleDuplicateJob(response, tabId, triggerScore, llmSettings) {
+    const info = response.duplicateInfo;
+    const scrapedAt = info.scrapedAt ? new Date(info.scrapedAt).toLocaleDateString() : 'unknown date';
+    
+    const message = `This job appears to be already saved:\n\n` +
+        `"${info.title || 'Untitled'}"\n` +
+        `at ${info.company || 'Unknown Company'}\n` +
+        `(saved on ${scrapedAt})\n\n` +
+        `Do you want to save it again anyway?`;
+    
+    if (confirm(message)) {
+        // User confirmed - force save the job
+        showStatus('Saving duplicate job...', 'info');
+        
+        chrome.runtime.sendMessage({
+            action: 'forceSaveJob',
+            job: response.scrapedJob,
+            tabId: tabId,
+            triggerScore: triggerScore,
+            settings: llmSettings
+        }, (saveResponse) => {
+            if (saveResponse && saveResponse.success) {
+                chrome.storage.sync.get({ downloadOption: 'any_scrape' }, (options) => {
+                    const message = options.downloadOption === 'any_scrape'
+                        ? 'Job saved and downloaded!'
+                        : 'Job saved to the backend!';
+                    showStatus(message, 'success');
+                    setTimeout(() => {
+                        window.close();
+                    }, 1500);
+                });
+            } else {
+                showStatus('Failed to save job: ' + (saveResponse?.error || 'Unknown error'), 'error');
+            }
+        });
+    } else {
+        // User cancelled
+        showStatus('Job not saved (duplicate skipped)', 'info');
+    }
+}
 
 function showStatus(message, type) {
     const status = document.getElementById('status');
