@@ -1,3 +1,9 @@
+import * as pdfjsLib from './build/pdf.mjs';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  chrome.runtime.getURL('build/pdf.worker.mjs');
+
+
 // Endpoint mappings for each provider
 const API_ENDPOINTS = {
     openai: 'https://api.openai.com/v1/chat/completions',
@@ -61,10 +67,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (resumeInput) {
-        resumeInput.addEventListener('change', () => {
+        resumeInput.addEventListener('change', async () => {
             const file = resumeInput.files[0];
             if (!file) return;
 
+            const rawResumeText =
+                file.type === 'application/pdf'
+                    ? await extractTextFromPDF(file)
+                    : await file.text();
+          
+            const resumeText = normalizeText(rawResumeText);
+            const anonymizedResumeText = anonymizeResume(resumeText);
+          
             const resumeMeta = {
                 name: file.name,
                 size: file.size,
@@ -72,13 +86,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 uploadedAt: new Date().toISOString()
             };
 
-            chrome.storage.sync.set({ resumeMeta }, () => {
-                storedResume = resumeMeta;
-
-                if (resumeStatus) {
-                    resumeStatus.textContent = `Uploaded: ${file.name}`;
+            chrome.storage.sync.set(
+                {
+                  resumeMeta,
+                  resumeText,
+                  anonymizedResumeText
+                },
+                () => {
+                  storedResume = resumeMeta;
+                  resumeStatus.textContent = `Uploaded: ${file.name}`;
                 }
-            });
+              );
         });
     }
 
@@ -630,6 +648,66 @@ async function validateAPIKey(settings) {
     }
 }
 
+// helper function to extract resume text
+async function extractTextFromPDF(file) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  
+      let text = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map(item => item.str).join(' ') + '\n';
+      }
+      return text;
+    } catch (err) {
+      console.error('PDF extraction failed:', err);
+      return '';
+    }
+  }
+
+// helper function to normlaize text for embedding similarity 
+function normalizeText(text) {
+    return text
+      .replace(/\s+/g, ' ')
+      .replace(/\u0000/g, '')
+      .trim();
+  }
+  
+
+// helper function to anonymize resume
+function anonymizeResume(text) {
+    let anonymized = text;
+  
+    // 1. Email
+    anonymized = anonymized.replace(
+      /\b[\w.-]+@[\w.-]+\.\w+\b/g,
+      '[EMAIL]'
+    );
+  
+    // 2. Phone
+    anonymized = anonymized.replace(
+        /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+        '[PHONE]'
+    );
+  
+    // 3. Name — ONLY at start or after "Resume"/"Name"
+    anonymized = anonymized.replace(
+      /^(Resume\s+Example\s+)?([A-Z][a-z]+ [A-Z][a-z]+)/m,
+      '[NAME]'
+    );
+  
+    anonymized = anonymized.replace(
+      /(Name:\s*)([A-Z][a-z]+ [A-Z][a-z]+)/,
+      '$1[NAME]'
+    );
+  
+    return anonymized;
+  }
+  
+  
+  
 function showStatus(message, type) {
     const status = document.getElementById('status');
     status.textContent = message;
