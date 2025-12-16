@@ -34,12 +34,59 @@ const DEFAULT_ELIGIBILITY_CATEGORIES = [
     { name: 'Preferred Skills', matched_columns: ['preferredSkills'], placeholder: 'e.g., PyTorch, AWS', default_weight: 10 }
 ];
 
+// ---- Resume state (shared across file) ----
+let storedResume = null;
+
+chrome.storage.sync.get(['resumeMeta'], (data) => {
+    storedResume = data.resumeMeta || null;
+});
+
+
 // Load saved settings
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize Scoring Logic UI
     initializeDesirabilityUI();
     initializeEligibilityUI();
     initializeOverallControls();
+
+    // --- Resume upload elements ---
+    const uploadBtn = document.getElementById('upload-resume-btn');
+    const resumeInput = document.getElementById('resumeInput');
+    const resumeStatus = document.getElementById('resumeStatus');
+
+    if (uploadBtn && resumeInput) {
+        uploadBtn.addEventListener('click', () => {
+            resumeInput.click();
+        });
+    }
+
+    if (resumeInput) {
+        resumeInput.addEventListener('change', () => {
+            const file = resumeInput.files[0];
+            if (!file) return;
+
+            const resumeMeta = {
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                uploadedAt: new Date().toISOString()
+            };
+
+            chrome.storage.sync.set({ resumeMeta }, () => {
+                storedResume = resumeMeta;
+
+                if (resumeStatus) {
+                    resumeStatus.textContent = `Uploaded: ${file.name}`;
+                }
+            });
+        });
+    }
+
+    chrome.storage.sync.get(['resumeMeta'], (data) => {
+        if (data.resumeMeta && resumeStatus) {
+            resumeStatus.textContent = `Uploaded: ${data.resumeMeta.name}`;
+        }
+    });
 
     // Load all settings
     chrome.storage.sync.get(['llmSettings', 'downloadOption', 'scoringSettings'], (data) => {
@@ -268,7 +315,7 @@ function validateScoringSettings() {
             return { isValid: false, message: `Eligibility criteria weights must total 100%, but currently total ${totalWeight}%.` };
         }
 
-        const hasResume = true; // Hardcoded as requested
+        const hasResume = !!storedResume;; // Hardcoded as requested
         if (!hasResume) {
             return { isValid: false, message: 'Eligibility weight is > 0%, but no resume has been uploaded. Please upload files or set the weight to 0%.' };
         }
@@ -591,5 +638,5 @@ function showStatus(message, type) {
     
     setTimeout(() => {
         status.style.display = 'none';
-    }, 3000);
+    }, 10000);
 }
