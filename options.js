@@ -116,14 +116,34 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('reset-eligibility').addEventListener('click', () => {
+        // 1. Clear eligibility UI
         const eligibilityRows = document.querySelectorAll('#eligibility-grid .scoring-row');
         eligibilityRows.forEach((row, index) => {
             const detailsInput = row.querySelector('.details-input');
             const weightInput = row.querySelector('.weight-input-container input');
+    
             if (detailsInput) detailsInput.value = '';
-            if (weightInput) weightInput.value = DEFAULT_ELIGIBILITY_CATEGORIES[index].default_weight;
+            if (weightInput && DEFAULT_ELIGIBILITY_CATEGORIES[index]) {
+                weightInput.value = DEFAULT_ELIGIBILITY_CATEGORIES[index].default_weight;
+            }
         });
+    
+        // 2. Clear resume from storage
+        chrome.storage.sync.remove(
+            ['resumeMeta', 'resumeText', 'anonymizedResumeText'],
+            () => {
+                // 3. Clear in-memory state
+                storedResume = null;
+    
+                // 4. Reset file input 
+                const fileInput = document.getElementById('resume-upload');
+                if (fileInput) fileInput.value = '';
+    
+                showStatus('Resume and eligibility data reset.', 'success');
+            }
+        );
     });
+    
 
     // Resume upload handler (merged)
     document.getElementById('resume-upload').addEventListener('change', async (event) => {
