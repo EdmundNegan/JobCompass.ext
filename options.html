@@ -696,7 +696,22 @@
                 <h3>Eligibility Criteria</h3>
                 <button id="reset-eligibility" class="btn-reset">Reset</button>
             </div>
-            <p class="help-text full-width-help" style="margin-bottom: 15px; margin-top: -15px;">Provide your details for each category to enable eligibility scoring. The LLM will compare job requirements against your profile.<br>Set the weight for each category to determine the eligibility score. The total should ideally be 100%.</p>
+            <p class="help-text full-width-help" style="margin-bottom: 15px; margin-top: -15px;">
+                Upload your resume/CV to automatically fill and validate eligibility details, or manually edit fields below.<br>
+                Set the weight for each category to determine the eligibility score. The total should ideally be 100%.
+            </p>
+            
+            <!-- <button id="upload-resume-btn" class="btn-secondary">Upload Files</button> -->
+
+            <input
+                type="file"
+                id="resumeInput"
+                accept=".pdf,.txt,.doc,.docx"
+                style="display: none;"
+            />
+            
+            <div id="resumeStatus" class="help-text full-width-help"></div>
+            
             <input type="file" id="resume-upload" accept=".txt,.pdf" style="margin-bottom: 20px;">
             <div class="help-text" style="margin-top: -15px; margin-bottom: 20px;">Upload your resume (TXT or PDF) to auto-fill details. <em>(Placeholder - basic parsing implemented)</em></div>
             <div class="eligibility-grid" id="eligibility-grid" style="margin-top: 20px;">
@@ -826,6 +841,6 @@
         </div>
     </div>
 
-    <script src="options.js"></script>
+    <script type="module" src="options.js"></script>
 </body>
 </html>
