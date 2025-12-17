@@ -23,15 +23,14 @@ const DEFAULT_DESIRABILITY_CATEGORIES = [
     { name: 'Salary and Benefits', matched_columns: ['salaryAndBenefits'], placeholder: 'e.g., >$100k, 401k matching', default_priority: 'exclude' },
     { name: 'Visa sponsorship', matched_columns: ['visaSponsorship'], placeholder: 'e.g., visa sponsorship, H1B', default_priority: 'mandatory' },
     { name: 'Responsibility', matched_columns: ['responsibilities'], placeholder: 'feature engineering, statistical modeling', default_priority: 'medium' },
-    { name: 'Skills', matched_columns: ['requiredSkills', 'preferredSkills'], placeholder: 'e.g., Python, SQL, research background', default_priority: 'medium' }
+    { name: 'Skills', matched_columns: 'requiredSkills', placeholder: 'e.g., Python, SQL, research background', default_priority: 'medium' }
 ];
 
 // Default eligibility scoring settings
 const DEFAULT_ELIGIBILITY_CATEGORIES = [
-    { name: 'Experience Level', matched_columns: ['experienceLevel'], placeholder: 'e.g., fresh grad, 1-3y, 3-5y', default_weight: 20 },
+    { name: 'Experience Level', matched_columns: ['experienceLevel'], placeholder: 'e.g., fresh grad, 1-3y, 3-5y', default_weight: 30 }, 
     { name: 'Education Level', matched_columns: ['educationLevel'], placeholder: 'e.g., Bachelor\'s, Master\'s', default_weight: 20 },
     { name: 'Required Skills', matched_columns: ['requiredSkills'], placeholder: 'e.g., Python, SQL, research background', default_weight: 50 },
-    { name: 'Preferred Skills', matched_columns: ['preferredSkills'], placeholder: 'e.g., PyTorch, AWS', default_weight: 10 }
 ];
 
 // Load saved settings
@@ -585,10 +584,6 @@ function createEligibilityRow(name, placeholder, defaultWeight) {
     weightInput.min = 0;
     weightInput.max = 100;
 
-    if (name === 'Preferred Skills') {
-        weightInput.id = 'preferred-skills-weight';
-    }
-
     // Add validation on blur to ensure the value is within the 0-100 range
     weightInput.addEventListener('blur', () => {
         let value = parseInt(weightInput.value, 10);
@@ -850,9 +845,6 @@ function parseResumeAndFillDetails(text) {
     });
     const requiredSkills = skills.slice(0, 3).join(', '); // take first 3
     
-    // Preferred Skills - similar
-    const preferredSkills = skills.slice(3).join(', ');
-    
     // Fill the inputs
     const eligibilityRows = document.querySelectorAll('#eligibility-grid .scoring-row');
     eligibilityRows.forEach((row, index) => {
@@ -867,9 +859,6 @@ function parseResumeAndFillDetails(text) {
                     break;
                 case 2: // Required Skills
                     detailsInput.value = requiredSkills;
-                    break;
-                case 3: // Preferred Skills
-                    detailsInput.value = preferredSkills;
                     break;
             }
         }

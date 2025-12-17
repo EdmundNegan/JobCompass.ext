@@ -1,37 +1,49 @@
 // Check if LLM is configured
 document.addEventListener('DOMContentLoaded', async () => {
     // Retrieve settings from sync storage (matching options.js)
-    const data = await chrome.storage.sync.get(['llmScraperSettings', 'scoringSettings']);
-    const llmSettings = data.llmScraperSettings;
+    const data = await chrome.storage.sync.get(['llmScraperSettings', 'scoringSettings', 'llmScoringSettings']);
+    const llmScraperSettings = data.llmScraperSettings;
     const scoringSettings = data.scoringSettings;
+    const llmScoringSettings = data.llmScoringSettings;
     
     const scrapeLLMBtn = document.getElementById('scrapeLLM');
     const scrapeAndScoreBtn = document.getElementById('scrapeAndScoreLLM');
     const scoreDesirabilityBtn = document.getElementById('scoreDesirability');
     
-    // 1. Check LLM API Configuration
-    if (!llmSettings || !llmSettings.enabled || !llmSettings.apiKey) {
-        const buttons = [scrapeLLMBtn, scrapeAndScoreBtn, scoreDesirabilityBtn];
-        buttons.forEach(btn => {
-            if (btn) {
-                btn.disabled = true;
-                btn.title = 'Please configure LLM API in Options first';
-            }
-        });
-    } else {
-        // 2. Check Scoring Configuration for Scoring Buttons
-        if (!scoringSettings || !scoringSettings.enabled || !scoringSettings.desirabilityCriteria || scoringSettings.desirabilityCriteria.length === 0) {
-            const scoringButtons = [scrapeAndScoreBtn, scoreDesirabilityBtn];
-            scoringButtons.forEach(btn => {
-                if (btn) {
-                    btn.disabled = true;
-                    if (!scoringSettings || !scoringSettings.enabled) {
-                        btn.title = 'Enable LLM Scoring in Options to use this feature';
-                    } else {
-                        btn.title = 'Please configure Desirability Criteria in Options first';
-                    }
-                }
-            });
+    // Check Scrape with LLM API button
+    if (!llmScraperSettings || !llmScraperSettings.enabled || !llmScraperSettings.apiKey) {
+        scrapeLLMBtn.disabled = true;
+        scrapeLLMBtn.title = 'Please enable LLM for Scraping and configure API in Options first';
+    }
+    
+    // Check Scrape & Score with LLM API button (requires both scraping and scoring enabled)
+    if (!llmScraperSettings || !llmScraperSettings.enabled || !llmScraperSettings.apiKey ||
+        !scoringSettings || !scoringSettings.enabled || !llmScoringSettings || !llmScoringSettings.apiKey ||
+        !scoringSettings.desirabilityCriteria || scoringSettings.desirabilityCriteria.length === 0) {
+        scrapeAndScoreBtn.disabled = true;
+        if (!llmScraperSettings || !llmScraperSettings.enabled) {
+            scrapeAndScoreBtn.title = 'Please enable LLM for Scraping in Options first';
+        } else if (!scoringSettings || !scoringSettings.enabled) {
+            scrapeAndScoreBtn.title = 'Please enable LLM for Scoring in Options first';
+        } else if (!llmScraperSettings.apiKey) {
+            scrapeAndScoreBtn.title = 'Please configure Scraping API key in Options first';
+        } else if (!llmScoringSettings || !llmScoringSettings.apiKey) {
+            scrapeAndScoreBtn.title = 'Please configure Scoring API key in Options first';
+        } else {
+            scrapeAndScoreBtn.title = 'Please configure Desirability Criteria in Options first';
+        }
+    }
+    
+    // Check Score for All Saved Jobs button
+    if (!scoringSettings || !scoringSettings.enabled || !llmScoringSettings || !llmScoringSettings.apiKey ||
+        !scoringSettings.desirabilityCriteria || scoringSettings.desirabilityCriteria.length === 0) {
+        scoreDesirabilityBtn.disabled = true;
+        if (!scoringSettings || !scoringSettings.enabled) {
+            scoreDesirabilityBtn.title = 'Enable LLM Scoring in Options to use this feature';
+        } else if (!llmScoringSettings || !llmScoringSettings.apiKey) {
+            scoreDesirabilityBtn.title = 'Please configure Scoring API key in Options first';
+        } else {
+            scoreDesirabilityBtn.title = 'Please configure Desirability Criteria in Options first';
         }
     }
 });
