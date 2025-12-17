@@ -102,9 +102,6 @@ document.getElementById('scrapeDefault').addEventListener('click', async () => {
                         ? 'Job scraped and downloaded to your device!'
                         : 'Job scraped and saved to the backend!';
                     showStatus(message, 'success');
-                    setTimeout(() => {
-                        window.close();
-                    }, 1500);
                 });
             } else {
                 showStatus(response?.error || 'Failed to scrape job', 'error');
@@ -167,9 +164,6 @@ document.getElementById('scrapeLLM').addEventListener('click', async () => {
                         ? 'Job scraped with LLM and downloaded to your device!'
                         : 'Job scraped with LLM and saved to the backend!';
                     showStatus(message, 'success');
-                    setTimeout(() => {
-                        window.close();
-                    }, 1500);
                 });
             } else {
                 const errorMsg = response?.error || 'Failed to scrape job with LLM';
@@ -238,9 +232,6 @@ if (scrapeAndScoreBtn) {
                             ? 'Job scraped, scored, and downloaded to your device!'
                             : 'Job scraped, scored, and saved to the backend!';
                         showStatus(message, 'success');
-                        setTimeout(() => {
-                            window.close();
-                        }, 1500);
                     });
                 } else {
                     const errorMsg = response?.error || 'Failed to scrape/score job';
@@ -345,9 +336,6 @@ function handleDuplicateJob(response, tabId, triggerScore, llmSettings) {
                         ? 'Job saved and downloaded!'
                         : 'Job saved to the backend!';
                     showStatus(message, 'success');
-                    setTimeout(() => {
-                        window.close();
-                    }, 1500);
                 });
             } else {
                 showStatus('Failed to save job: ' + (saveResponse?.error || 'Unknown error'), 'error');
