@@ -1,3 +1,8 @@
+import * as pdfjsLib from './build/pdf.mjs';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  chrome.runtime.getURL('build/pdf.worker.mjs');
+
 // Endpoint mappings for each provider
 const API_ENDPOINTS = {
     openai: 'https://api.openai.com/v1/chat/completions',
@@ -32,6 +37,13 @@ const DEFAULT_ELIGIBILITY_CATEGORIES = [
     { name: 'Education Level', matched_columns: ['educationLevel'], placeholder: 'e.g., Bachelor\'s, Master\'s', default_weight: 20 },
     { name: 'Required Skills', matched_columns: ['requiredSkills'], placeholder: 'e.g., Python, SQL, research background', default_weight: 50 },
 ];
+
+// ---- Resume state ----
+let storedResume = null;
+
+chrome.storage.sync.get(['resumeMeta'], ({ resumeMeta }) => {
+    const hasResume = !!resumeMeta;
+  });  
 
 // Load saved settings
 document.addEventListener('DOMContentLoaded', () => {
@@ -113,31 +125,56 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Resume upload handler
+    // Resume upload handler (merged)
     document.getElementById('resume-upload').addEventListener('change', async (event) => {
         const file = event.target.files[0];
         if (!file) return;
 
         try {
-            let text = '';
+            let rawText = '';
+
+            // ---- Extract text ----
             if (file.type === 'text/plain') {
-                text = await readFileAsText(file);
+                rawText = await readFileAsText(file);
             } else if (file.type === 'application/pdf') {
-                // Placeholder for PDF parsing
-                alert('PDF parsing is not implemented yet. Please upload a TXT file.');
-                return;
+                rawText = await extractTextFromPDF(file);
             } else {
                 alert('Please upload a TXT or PDF file.');
                 return;
             }
 
-            // Parse the resume text and fill details
-            parseResumeAndFillDetails(text);
+            // parsing 
+            const resumeText = normalizeText(rawText);
+            const anonymizedResumeText = anonymizeResume(resumeText);
+
+            const resumeMeta = {
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                uploadedAt: new Date().toISOString()
+            };
+
+            chrome.storage.sync.set(
+                {
+                    resumeMeta,
+                    resumeText,
+                    anonymizedResumeText
+                },
+                () => {
+                    storedResume = resumeMeta;
+                }
+            );
+
+            parseResumeAndFillDetails(resumeText);
+
+            showStatus(`Resume uploaded: ${file.name}`, 'success');
+
         } catch (error) {
             console.error('Error reading file:', error);
             alert('Error reading file: ' + error.message);
         }
     });
+
 });
 
 // Show/hide LLM settings based on checkbox
@@ -390,9 +427,15 @@ function validateScoringSettings() {
             return { isValid: false, message: `Eligibility criteria weights must total 100%, but currently total ${totalWeight}%.` };
         }
 
-        if (!hasDetails) {
-            return { isValid: false, message: 'Eligibility weight is > 0%, but no details have been provided. Please fill in your details or set the weight to 0%.' };
+        const hasResume = !!storedResume;
+
+        if (!hasDetails && !hasResume) {
+            return {
+                isValid: false,
+                message: 'Eligibility weight is > 0%, but no resume or details have been provided.'
+            };
         }
+
     }
 
     return { isValid: true };
@@ -1107,6 +1150,68 @@ function escapeHtml(text) {
     div.textContent = text;
     return div.innerHTML;
 }
+// helper function to extract resume text
+async function extractTextFromPDF(file) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  
+      let text = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += content.items.map(item => item.str).join(' ') + '\n';
+      }
+      return text;
+    } catch (err) {
+      console.error('PDF extraction failed:', err);
+      return '';
+    }
+  }
 
+// helper function to normlaize text for embedding similarity 
+function normalizeText(text) {
+    return text
+      .replace(/\s+/g, ' ')
+      .replace(/\u0000/g, '')
+      .trim();
+  }
+  
+
+// helper function to anonymize resume
+function anonymizeResume(text) {
+    let anonymized = text;
+  
+    // 1. Email
+    anonymized = anonymized.replace(
+      /\b[\w.-]+@[\w.-]+\.\w+\b/g,
+      '[EMAIL]'
+    );
+  
+    // 2. Phone
+    anonymized = anonymized.replace(
+        /\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+        '[PHONE]'
+    );
+  
+    // 3. Name — ONLY at start or after "Resume"/"Name"
+    anonymized = anonymized.replace(
+      /^(Resume\s+Example\s+)?([A-Z][a-z]+ [A-Z][a-z]+)/m,
+      '[NAME]'
+    );
+  
+    anonymized = anonymized.replace(
+      /(Name:\s*)([A-Z][a-z]+ [A-Z][a-z]+)/,
+      '$1[NAME]'
+    );
+
+    // 4. Address (very conservative)
+    anonymized = anonymized.replace(
+        /\b\d{1,5}\s+\w+(?:\s+\w+)*,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s*\d{5}\b/g,
+        '[ADDRESS]'
+    );
+  
+    return anonymized;
+  }
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', initializeSavedJobsUI);
