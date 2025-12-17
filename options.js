@@ -45,8 +45,147 @@ chrome.storage.sync.get(['resumeMeta'], ({ resumeMeta }) => {
     const hasResume = !!resumeMeta;
   });  
 
+// Initialize collapsible sections
+function initializeCollapsibleSections(callback) {
+    console.log('Initializing collapsible sections...');
+    
+    // Load saved collapse states and scrollToSavedJobs flag together
+    chrome.storage.local.get(['collapsedSections', 'scrollToSavedJobs'], (data) => {
+        const collapsedSections = data.collapsedSections || {};
+        const shouldScrollToJobs = data.scrollToSavedJobs || false;
+        
+        console.log('Loaded collapse states:', collapsedSections);
+        console.log('Should scroll to saved jobs:', shouldScrollToJobs);
+        
+        // Set up click handlers for all collapsible headers
+        document.querySelectorAll('.collapsible-header').forEach(header => {
+            const sectionName = header.dataset.section;
+            const content = document.querySelector(`.collapsible-content[data-section="${sectionName}"]`);
+            
+            if (!content) return;
+            
+            // Special handling for saved-jobs section if we need to scroll to it
+            if (sectionName === 'saved-jobs' && shouldScrollToJobs) {
+                console.log('Keeping saved-jobs section expanded for auto-scroll');
+                // Don't apply collapsed state, keep it expanded
+                header.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+            } else {
+                // Restore saved state for other sections
+                if (collapsedSections[sectionName]) {
+                    header.classList.add('collapsed');
+                    content.classList.add('collapsed');
+                }
+            }
+            
+            // Add click handler
+            header.addEventListener('click', () => {
+                const isCollapsed = header.classList.contains('collapsed');
+                
+                if (isCollapsed) {
+                    header.classList.remove('collapsed');
+                    content.classList.remove('collapsed');
+                    collapsedSections[sectionName] = false;
+                } else {
+                    header.classList.add('collapsed');
+                    content.classList.add('collapsed');
+                    collapsedSections[sectionName] = true;
+                }
+                
+                // Save state
+                chrome.storage.local.set({ collapsedSections });
+            });
+        });
+        
+        // Call the callback after initialization is complete
+        if (callback) {
+            callback();
+        }
+    });
+}
+
+// Scroll to saved jobs section
+function scrollToSavedJobsSection() {
+    console.log('Scrolling to saved jobs section...');
+    
+    // Expand saved jobs section if collapsed
+    const savedJobsHeader = document.querySelector('.collapsible-header[data-section="saved-jobs"]');
+    const savedJobsContent = document.querySelector('.collapsible-content[data-section="saved-jobs"]');
+    
+    if (savedJobsHeader && savedJobsContent) {
+        savedJobsHeader.classList.remove('collapsed');
+        savedJobsContent.classList.remove('collapsed');
+        console.log('Expanded saved jobs section');
+    }
+    
+    // Scroll to saved jobs section after a delay to ensure expansion animation completes
+    setTimeout(() => {
+        const savedJobsSection = document.getElementById('saved-jobs-section');
+        console.log('Attempting to scroll to element:', savedJobsSection);
+        
+        if (savedJobsSection) {
+            // Scroll with smooth behavior
+            savedJobsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            console.log('Scroll command executed');
+            
+            // Also try with a backup method in case smooth scroll doesn't work
+            setTimeout(() => {
+                window.scrollTo({
+                    top: savedJobsSection.offsetTop - 20,
+                    behavior: 'smooth'
+                });
+            }, 100);
+        } else {
+            console.error('Could not find saved-jobs-section element');
+        }
+    }, 200);
+}
+
+// Initialize saved jobs UI and scroll handling
+function initializeSavedJobsAndScroll() {
+    initializeSavedJobsUI();
+    
+    // Check if we should scroll to saved jobs section
+    chrome.storage.local.get(['scrollToSavedJobs'], (data) => {
+        console.log('Checking scrollToSavedJobs flag:', data.scrollToSavedJobs);
+        
+        if (data.scrollToSavedJobs) {
+            // Clear the flag
+            chrome.storage.local.remove(['scrollToSavedJobs']);
+            
+            console.log('Auto-scrolling to saved jobs section...');
+            scrollToSavedJobsSection();
+        }
+    });
+}
+
+// Listen for storage changes (for when page is already open)
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'local' && changes.scrollToSavedJobs) {
+        console.log('Storage change detected for scrollToSavedJobs:', changes.scrollToSavedJobs);
+        
+        if (changes.scrollToSavedJobs.newValue === true) {
+            console.log('Page already open, scrolling to saved jobs...');
+            
+            // Clear the flag
+            chrome.storage.local.remove(['scrollToSavedJobs']);
+            
+            // Scroll to the section
+            scrollToSavedJobsSection();
+        }
+    }
+});
+
 // Load saved settings
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize collapsible sections first, then initialize jobs UI
+    initializeCollapsibleSections(() => {
+        console.log('Collapsible sections initialized, now initializing saved jobs UI');
+        
+        // Initialize saved jobs UI and scroll handling after collapsible sections are ready
+        initializeSavedJobsAndScroll();
+    });
+    
     // Initialize Scoring Logic UI
     initializeDesirabilityUI();
     initializeEligibilityUI();
@@ -1104,7 +1243,7 @@ function deleteJob(index) {
 // Clear all jobs
 function clearAllJobs() {
     if (savedJobs.length === 0) {
-        showStatus('No jobs to clear.', 'info');
+        alert('No jobs to clear.');
         return;
     }
     
@@ -1118,7 +1257,7 @@ function clearAllJobs() {
         } else {
             savedJobs = [];
             renderJobsTable();
-            showStatus('All jobs cleared successfully!', 'success');
+            alert('All jobs cleared successfully!');
             
             // Update badge
             chrome.runtime.sendMessage({ action: 'updateBadge', count: 0 });
@@ -1129,7 +1268,7 @@ function clearAllJobs() {
 // Download jobs as CSV
 function downloadJobsCSV() {
     if (savedJobs.length === 0) {
-        showStatus('No jobs to download.', 'info');
+        alert('No jobs to download.');
         return;
     }
     
@@ -1233,5 +1372,3 @@ function anonymizeResume(text) {
   
     return anonymized;
   }
-// Initialize on DOM load
-document.addEventListener('DOMContentLoaded', initializeSavedJobsUI);

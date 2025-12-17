@@ -279,8 +279,11 @@ document.getElementById('openOptions').addEventListener('click', () => {
 
 // View/Edit saved jobs (opens options page to saved jobs section)
 document.getElementById('viewEditJobs').addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
-    window.close();
+    // Set a flag to scroll to saved jobs section
+    chrome.storage.local.set({ scrollToSavedJobs: true }, () => {
+        chrome.runtime.openOptionsPage();
+        window.close();
+    });
 });
 
 // Download saved jobs (download CSV)
@@ -289,7 +292,7 @@ document.getElementById('downloadJobs').addEventListener('click', async () => {
         if (response && response.success) {
             showStatus('CSV downloaded!', 'success');
         } else {
-            showStatus('No jobs to download', 'info');
+            alert('No jobs to download');
         }
     });
 });
@@ -300,7 +303,7 @@ document.getElementById('clearJobs').addEventListener('click', async (e) => {
     if (confirm('Are you sure you want to clear all saved jobs? This action cannot be undone.')) {
         chrome.runtime.sendMessage({ action: 'clearJobs' }, (response) => {
             if (response && response.success) {
-                showStatus('All jobs cleared!', 'success');
+                alert('All jobs cleared!');
             } else {
                 showStatus('Failed to clear jobs', 'error');
             }
