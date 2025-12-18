@@ -545,7 +545,7 @@ ${criteriaText}
 
 Scoring Logic:
 1. If the information for a category does not exist in the job details, extract information based on Description.
-2. For 'mandatory' priority: if the job clearly does not match the preference, return 0. Else return 50.
+2. For 'mandatory' priority: if the job clearly does not match the preference, return 0. If the job clearly matches the preference, return 100. Else return 50.
 3. For other priorities: rate the match from 0 to 100 based on the preference.
 
 Return a JSON object with:
